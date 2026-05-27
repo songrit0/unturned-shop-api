@@ -3,6 +3,7 @@ import { SchedulerRegistry } from '@nestjs/schedule';
 import { CronJob } from 'cron';
 import { ConfigService } from '@nestjs/config';
 import { PricingService } from './pricing.service';
+import { MarketHistoryService } from '../market-history/market-history.service';
 
 @Injectable()
 export class PricingCronService implements OnModuleInit {
@@ -12,12 +13,23 @@ export class PricingCronService implements OnModuleInit {
     private readonly cfg: ConfigService,
     private readonly pricing: PricingService,
     private readonly scheduler: SchedulerRegistry,
+    private readonly history: MarketHistoryService,
   ) {}
 
   onModuleInit() {
     const cron = process.env.PRICING_RECOMPUTE_CRON || '*/30 * * * * *'; // every 30 seconds
-    const job = new CronJob(cron, () => {
-      this.pricing.recomputeAll().catch(e => this.log.warn(`recompute failed: ${e.message}`));
+    const job = new CronJob(cron, async () => {
+      try {
+        await this.pricing.recomputeAll();
+      } catch (e: any) {
+        this.log.warn(`recompute failed: ${e.message}`);
+      }
+      // Snapshot must NEVER break the recompute cron — independent try/catch.
+      try {
+        await this.history.snapshotAll();
+      } catch (e: any) {
+        this.log.warn(`price history snapshot failed: ${e.message}`);
+      }
     });
     this.scheduler.addCronJob('pricingRecompute', job as any);
     job.start();

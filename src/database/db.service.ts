@@ -53,6 +53,28 @@ export class DbService implements OnModuleInit, OnModuleDestroy {
 
     // Master items refactor: sv_items + lean sv_market
     await this.ensureMasterItems();
+
+    // Price history (candle chart source)
+    await this.ensurePriceHistory();
+  }
+
+  private async ensurePriceHistory() {
+    const history = this.table('sv', 'market_price_history');
+    try {
+      await this.query(
+        `CREATE TABLE IF NOT EXISTS ${history} (
+          id BIGINT AUTO_INCREMENT PRIMARY KEY,
+          item_id INT UNSIGNED NOT NULL,
+          price DOUBLE NOT NULL,
+          amount INT NOT NULL,
+          snapshot_at DATETIME NOT NULL,
+          INDEX idx_item_time (item_id, snapshot_at),
+          INDEX idx_snapshot_at (snapshot_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+      );
+    } catch (e: any) {
+      this.log.warn(`market_price_history ensure failed: ${e.message}`);
+    }
   }
 
   private async ensureMasterItems() {

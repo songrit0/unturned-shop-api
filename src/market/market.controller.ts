@@ -1,9 +1,22 @@
-import { Controller, Get, NotFoundException, Param, ParseIntPipe, Query } from '@nestjs/common';
+import { BadRequestException, Controller, Get, NotFoundException, Param, ParseIntPipe, Query } from '@nestjs/common';
 import { MarketService, MarketKind } from './market.service';
+import { MarketHistoryService, CandleInterval } from '../market-history/market-history.service';
+
+const CANDLE_INTERVALS: CandleInterval[] = ['1m', '5m', '15m', '1h', '4h', '1d'];
+
+function parseIsoOrDefault(v: string | undefined, fallback: Date): Date {
+  if (!v) return fallback;
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) throw new BadRequestException(`Invalid date: ${v}`);
+  return d;
+}
 
 @Controller('market')
 export class MarketController {
-  constructor(private readonly market: MarketService) {}
+  constructor(
+    private readonly market: MarketService,
+    private readonly history: MarketHistoryService,
+  ) {}
 
   /** GET /market?type=normal|bills|all&type_id=<id>  (default: normal — excludes cash bills) */
   @Get()
@@ -17,10 +30,58 @@ export class MarketController {
     return this.market.list(kind, tid);
   }
 
-  /** GET /market/types — public read-only list of sv_item_types (for frontend dropdown). Declared before :id to avoid route collision. */
+  /** GET /market/types — public read-only list of sv_item_types. Declared before :id to avoid route collision. */
   @Get('types')
   listTypes() {
     return this.market.listTypes();
+  }
+
+  /** GET /market/transactions?page=&limit=&kind=buy|sell|all — global cross-item transaction log. Declared before :id. */
+  @Get('transactions')
+  globalTransactions(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('kind') kind?: string,
+  ) {
+    const k = kind === 'buy' || kind === 'sell' ? kind : 'all';
+    return this.history.transactionsGlobal(parseInt(page!, 10), parseInt(limit!, 10), k);
+  }
+
+  /** GET /market/:item_id/candles?interval=&from=&to= */
+  @Get(':item_id/candles')
+  candles(
+    @Param('item_id', ParseIntPipe) itemId: number,
+    @Query('interval') interval?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    const iv = (interval && (CANDLE_INTERVALS as string[]).includes(interval)
+      ? (interval as CandleInterval)
+      : '1h');
+    if (interval && !(CANDLE_INTERVALS as string[]).includes(interval)) {
+      throw new BadRequestException(`interval must be one of: ${CANDLE_INTERVALS.join(',')}`);
+    }
+    const toDate = parseIsoOrDefault(to, new Date());
+    const fromDate = parseIsoOrDefault(from, new Date(toDate.getTime() - 24 * 3600 * 1000));
+    return this.history.candles(itemId, iv, fromDate, toDate);
+  }
+
+  /** GET /market/:item_id/forecast */
+  @Get(':item_id/forecast')
+  async forecast(@Param('item_id', ParseIntPipe) itemId: number) {
+    const f = await this.history.forecast(itemId);
+    if (!f) throw new NotFoundException('Item not found');
+    return f;
+  }
+
+  /** GET /market/:item_id/transactions?page=&limit= */
+  @Get(':item_id/transactions')
+  itemTransactions(
+    @Param('item_id', ParseIntPipe) itemId: number,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.history.transactionsForItem(itemId, parseInt(page!, 10), parseInt(limit!, 10));
   }
 
   @Get(':id')

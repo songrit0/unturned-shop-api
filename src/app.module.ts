@@ -17,6 +17,7 @@ import { PricingModule } from './pricing/pricing.module';
 import { ItemTypesModule } from './item-types/item-types.module';
 import { QuestsModule } from './quests/quests.module';
 import { ItemsModule } from './items/items.module';
+import { MarketHistoryModule } from './market-history/market-history.module';
 import { HealthController } from './health/health.controller';
 import { VersionController } from './health/version.controller';
 
@@ -39,6 +40,7 @@ import { VersionController } from './health/version.controller';
     ItemTypesModule,
     QuestsModule,
     ItemsModule,
+    MarketHistoryModule,
   ],
   controllers: [HealthController, VersionController],
 })
