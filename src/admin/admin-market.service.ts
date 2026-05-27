@@ -59,14 +59,19 @@ export class AdminMarketService {
       throw new BadRequestException('Item not found in catalog');
     }
 
+    // Pull name/image_url from sv_items in the same statement so the INSERT still
+    // satisfies NOT NULL constraints on legacy sv_market.name / sv_market.image_url
+    // when SHOP_API_DROP_LEGACY_MARKET_COLS is unset. After those columns are dropped,
+    // remove `name`, `image_url` from the column list and the SELECT projection.
     await this.db.query(
-      `INSERT INTO ${market} (item_id, price, amount, base_price, target_stock, elasticity, enabled)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO ${market} (item_id, name, image_url, price, amount, base_price, target_stock, elasticity, enabled)
+       SELECT ?, i.name, i.image_url, ?, ?, ?, ?, ?, ?
+       FROM ${items} i WHERE i.id = ?
        ON DUPLICATE KEY UPDATE
          amount = VALUES(amount),
          base_price = VALUES(base_price), target_stock = VALUES(target_stock), elasticity = VALUES(elasticity),
          enabled = VALUES(enabled)`,
-      [i.item_id, i.base_price, i.amount, i.base_price, i.target_stock, i.elasticity, i.enabled ? 1 : 0],
+      [i.item_id, i.base_price, i.amount, i.base_price, i.target_stock, i.elasticity, i.enabled ? 1 : 0, i.item_id],
     );
     await this.pricing.recomputeFor([i.item_id]);
     return this.getOne(i.item_id);
