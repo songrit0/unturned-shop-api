@@ -24,7 +24,7 @@ export class CodesService {
     const owners = this.db.table('sv', 'code_owners');
     const codes = this.db.table('rc', 'codes');
     const codeItems = this.db.table('rc', 'code_items');
-    const market = this.db.table('sv', 'market');
+    const itemsT = this.db.table('sv', 'items');
 
     const rows = await this.db.query<any>(
       `SELECT c.id AS code_id, c.code, c.max_uses, c.uses, c.enabled, c.expires_at, c.created_at
@@ -39,9 +39,9 @@ export class CodesService {
 
     const codeIds = rows.map(r => r.code_id);
     const items = await this.db.query<any>(
-      `SELECT ci.code_id, ci.item_id, ci.amount, m.name, m.image_url
+      `SELECT ci.code_id, ci.item_id, ci.amount, i.name, i.image_url
        FROM ${codeItems} ci
-       LEFT JOIN ${market} m ON m.item_id = ci.item_id
+       LEFT JOIN ${itemsT} i ON i.id = ci.item_id
        WHERE ci.code_id IN (${codeIds.map(() => '?').join(',')})`,
       codeIds,
     );

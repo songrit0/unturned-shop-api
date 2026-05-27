@@ -7,5 +7,6 @@ import { AdminCoinsService } from './admin-coins.service';
 @Module({
   controllers: [AdminMarketController, AdminCoinsController],
   providers: [AdminMarketService, AdminCoinsService],
+  exports: [AdminMarketService],
 })
 export class AdminModule {}

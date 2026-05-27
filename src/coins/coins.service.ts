@@ -31,15 +31,15 @@ export class CoinsService {
     const np = this.normPage(page, limit);
     if (!steamId) return { items: [], total: 0, page: np.page, limit: np.limit, pages: 0 };
     const log = this.db.table('sv', 'market_log');
-    const market = this.db.table('sv', 'market');
+    const itemsT = this.db.table('sv', 'items');
 
     const cnt = await this.db.first<{ c: number }>(
       `SELECT COUNT(*) AS c FROM ${log} WHERE steam_id = ?`, [steamId],
     );
     const total = cnt ? Number(cnt.c) : 0;
     const items = await this.db.query<MarketLogRow>(
-      `SELECT l.id, l.item_id, l.amount, l.coins, l.kind, l.at, m.name
-       FROM ${log} l LEFT JOIN ${market} m ON m.item_id = l.item_id
+      `SELECT l.id, l.item_id, l.amount, l.coins, l.kind, l.at, i.name
+       FROM ${log} l LEFT JOIN ${itemsT} i ON i.id = l.item_id
        WHERE l.steam_id = ? ORDER BY l.id DESC LIMIT ? OFFSET ?`,
       [steamId, np.limit, np.offset],
     );

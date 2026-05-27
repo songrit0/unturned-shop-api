@@ -36,9 +36,12 @@ export class BasketService {
 
     const ids = [...b.keys()];
     const market = this.db.table('sv', 'market');
+    const itemsT = this.db.table('sv', 'items');
     const rows = await this.db.query<{ item_id: number; name: string; price: number; amount: number; image_url: string | null }>(
-      `SELECT item_id, name, price, amount, image_url FROM ${market}
-       WHERE item_id IN (${ids.map(() => '?').join(',')}) AND enabled = 1`,
+      `SELECT m.item_id, i.name, m.price, m.amount, i.image_url
+       FROM ${market} m
+       LEFT JOIN ${itemsT} i ON i.id = m.item_id
+       WHERE m.item_id IN (${ids.map(() => '?').join(',')}) AND m.enabled = 1`,
       ids,
     );
     const byId = new Map(rows.map(r => [Number(r.item_id), r]));
@@ -98,6 +101,7 @@ export class BasketService {
     try {
       await conn.beginTransaction();
       const market = this.db.table('sv', 'market');
+      const itemsT = this.db.table('sv', 'items');
       const coins = this.db.table('sv', 'coins');
       const log = this.db.table('sv', 'market_log');
       const codes = this.db.table('rc', 'codes');
@@ -109,7 +113,10 @@ export class BasketService {
       const purchased: { item_id: number; name: string; qty: number; coins: number }[] = [];
       for (const { item_id, qty } of items) {
         const [rows] = await conn.query(
-          `SELECT name, price, amount FROM ${market} WHERE item_id = ? AND enabled = 1 FOR UPDATE`,
+          `SELECT i.name, m.price, m.amount
+           FROM ${market} m
+           LEFT JOIN ${itemsT} i ON i.id = m.item_id
+           WHERE m.item_id = ? AND m.enabled = 1 FOR UPDATE`,
           [item_id],
         );
         const r = (rows as any[])[0];

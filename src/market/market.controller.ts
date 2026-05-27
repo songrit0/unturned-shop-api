@@ -5,11 +5,22 @@ import { MarketService, MarketKind } from './market.service';
 export class MarketController {
   constructor(private readonly market: MarketService) {}
 
-  /** GET /market?type=normal|bills|all  (default: normal — excludes cash bills) */
+  /** GET /market?type=normal|bills|all&type_id=<id>  (default: normal — excludes cash bills) */
   @Get()
-  list(@Query('type') type?: string) {
+  list(@Query('type') type?: string, @Query('type_id') typeId?: string) {
     const kind: MarketKind = type === 'bills' || type === 'all' ? type : 'normal';
-    return this.market.list(kind);
+    let tid: number | null = null;
+    if (typeId != null && typeId !== '' && typeId !== 'null') {
+      const parsed = parseInt(typeId, 10);
+      if (Number.isFinite(parsed) && parsed > 0) tid = parsed;
+    }
+    return this.market.list(kind, tid);
+  }
+
+  /** GET /market/types — public read-only list of sv_item_types (for frontend dropdown). Declared before :id to avoid route collision. */
+  @Get('types')
+  listTypes() {
+    return this.market.listTypes();
   }
 
   @Get(':id')

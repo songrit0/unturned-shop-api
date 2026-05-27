@@ -1,17 +1,15 @@
 import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Put, UseGuards } from '@nestjs/common';
-import { IsBoolean, IsInt, IsNumber, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import { IsBoolean, IsInt, IsNumber, IsOptional, Max, Min } from 'class-validator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { AdminGuard } from '../common/guards/admin.guard';
 import { AdminMarketService } from './admin-market.service';
 
 class UpsertMarketDto {
   @IsInt() @Min(1) item_id!: number;
-  @IsString() @MaxLength(64) name!: string;
   @IsNumber() @Min(0) base_price!: number;
   @IsInt() @Min(1) target_stock!: number;
   @IsNumber() @Min(0) @Max(2) elasticity!: number;
   @IsInt() @Min(0) amount!: number;
-  @IsOptional() @IsString() @MaxLength(512) image_url?: string;
   @IsOptional() @IsBoolean() enabled?: boolean;
 }
 
@@ -28,9 +26,9 @@ export class AdminMarketController {
   @Post()
   upsert(@Body() body: UpsertMarketDto) {
     return this.svc.upsert({
-      item_id: body.item_id, name: body.name,
+      item_id: body.item_id,
       base_price: body.base_price, target_stock: body.target_stock, elasticity: body.elasticity,
-      amount: body.amount, image_url: body.image_url ?? null,
+      amount: body.amount,
       enabled: body.enabled !== false,
     });
   }

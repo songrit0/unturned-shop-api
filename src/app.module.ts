@@ -14,6 +14,9 @@ import { CodesModule } from './codes/codes.module';
 import { TaxModule } from './tax/tax.module';
 import { AdminModule } from './admin/admin.module';
 import { PricingModule } from './pricing/pricing.module';
+import { ItemTypesModule } from './item-types/item-types.module';
+import { QuestsModule } from './quests/quests.module';
+import { ItemsModule } from './items/items.module';
 import { HealthController } from './health/health.controller';
 import { VersionController } from './health/version.controller';
 
@@ -33,6 +36,9 @@ import { VersionController } from './health/version.controller';
     TaxModule,
     AdminModule,
     PricingModule,
+    ItemTypesModule,
+    QuestsModule,
+    ItemsModule,
   ],
   controllers: [HealthController, VersionController],
 })
