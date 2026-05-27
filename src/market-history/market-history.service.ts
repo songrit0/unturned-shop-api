@@ -37,7 +37,7 @@ export interface Forecast {
 export interface TransactionRow {
   at: Date;
   steam_id: string;
-  discord_username: string | null;
+  discord_id: string | null;
   item_id: number;
   item_name: string | null;
   kind: string;
@@ -204,7 +204,7 @@ export class MarketHistoryService {
 
     const rows = await this.db.query<any>(
       `SELECT l.at, l.steam_id, l.item_id, l.amount, l.coins, l.kind,
-              i.name AS item_name, lk.discord_username
+              i.name AS item_name, lk.discord_id
        FROM ${log} l
        LEFT JOIN ${items} i ON i.id = l.item_id
        LEFT JOIN ${links} lk ON lk.steam_id = l.steam_id
@@ -216,7 +216,7 @@ export class MarketHistoryService {
     const items_out: TransactionRow[] = rows.map((r) => ({
       at: r.at,
       steam_id: String(r.steam_id),
-      discord_username: r.discord_username ?? null,
+      discord_id: r.discord_id != null ? String(r.discord_id) : null,
       item_id: Number(r.item_id),
       item_name: r.item_name ?? null,
       kind: String(r.kind),
@@ -249,7 +249,7 @@ export class MarketHistoryService {
 
     const rows = await this.db.query<any>(
       `SELECT l.at, l.steam_id, l.item_id, l.amount, l.coins, l.kind,
-              i.name AS item_name, lk.discord_username
+              i.name AS item_name, lk.discord_id
        FROM ${log} l
        LEFT JOIN ${items} i ON i.id = l.item_id
        LEFT JOIN ${links} lk ON lk.steam_id = l.steam_id
@@ -261,7 +261,7 @@ export class MarketHistoryService {
     const items_out: TransactionRow[] = rows.map((r) => ({
       at: r.at,
       steam_id: String(r.steam_id),
-      discord_username: r.discord_username ?? null,
+      discord_id: r.discord_id != null ? String(r.discord_id) : null,
       item_id: Number(r.item_id),
       item_name: r.item_name ?? null,
       kind: String(r.kind),
