@@ -2,6 +2,14 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { DbService } from '../database/db.service';
 import { periodKey, QuestResetType } from '../common/period-key';
 
+/** Convert an ISO-8601 string from the frontend into a Date that mysql2 will
+ *  serialize to MySQL DATETIME. Returns null for null/undefined/empty/invalid. */
+function toMysqlDateTime(iso: string | null | undefined): Date | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
 export interface QuestItem {
   item_id: number;
   qty_required: number;
@@ -123,7 +131,8 @@ export class QuestsService {
       const [res]: any = await conn.query(
         `INSERT INTO ${quests} (name, description, reward_coins, reset_type, enabled, start_at, end_at)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [i.name, i.description, i.reward_coins, i.reset_type, i.enabled ? 1 : 0, i.start_at, i.end_at],
+        [i.name, i.description, i.reward_coins, i.reset_type, i.enabled ? 1 : 0,
+         toMysqlDateTime(i.start_at), toMysqlDateTime(i.end_at)],
       );
       const id = Number(res.insertId);
       for (const it of i.items) {
@@ -152,7 +161,8 @@ export class QuestsService {
       await conn.query(
         `UPDATE ${quests} SET name = ?, description = ?, reward_coins = ?, reset_type = ?,
            enabled = ?, start_at = ?, end_at = ? WHERE id = ?`,
-        [i.name, i.description, i.reward_coins, i.reset_type, i.enabled ? 1 : 0, i.start_at, i.end_at, id],
+        [i.name, i.description, i.reward_coins, i.reset_type, i.enabled ? 1 : 0,
+         toMysqlDateTime(i.start_at), toMysqlDateTime(i.end_at), id],
       );
       await conn.query(`DELETE FROM ${items} WHERE quest_id = ?`, [id]);
       for (const it of i.items) {
