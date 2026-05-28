@@ -65,7 +65,7 @@ export class P2pController {
     return this.p2p.listingsForSeller(steam, q.page, q.limit);
   }
 
-  @Get(':id')
+  @Get(':id(\\d+)')
   getOne(@Param('id', ParseIntPipe) id: number) {
     return this.p2p.getListing(id);
   }
@@ -80,7 +80,7 @@ export class P2pController {
     });
   }
 
-  @Delete(':id')
+  @Delete(':id(\\d+)')
   async cancel(@CurrentUser() user: JwtPayload, @Param('id', ParseIntPipe) id: number) {
     const steam = await this.requireSteam(user);
     return this.p2p.cancelListing(steam, id);

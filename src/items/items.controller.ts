@@ -38,7 +38,7 @@ export class AdminItemsController {
     return this.svc.list({ q: q || undefined, type_id: parseIntQuery(typeId), page: pq.page, limit: pq.limit });
   }
 
-  @Get(':id') getOne(@Param('id', ParseIntPipe) id: number) { return this.svc.getOne(id); }
+  @Get(':id(\\d+)') getOne(@Param('id', ParseIntPipe) id: number) { return this.svc.getOne(id); }
 
   @Post()
   create(@Body() body: CreateItemDto) {
@@ -50,7 +50,7 @@ export class AdminItemsController {
     });
   }
 
-  @Put(':id')
+  @Put(':id(\\d+)')
   update(@Param('id', ParseIntPipe) id: number, @Body() body: UpdateItemDto) {
     return this.svc.update(id, {
       name: body.name,
@@ -60,7 +60,7 @@ export class AdminItemsController {
     });
   }
 
-  @Delete(':id') remove(@Param('id', ParseIntPipe) id: number) { return this.svc.remove(id); }
+  @Delete(':id(\\d+)') remove(@Param('id', ParseIntPipe) id: number) { return this.svc.remove(id); }
 }
 
 @Controller('items')
@@ -72,5 +72,5 @@ export class ItemsController {
     return this.svc.list({ q: q || undefined, type_id: parseIntQuery(typeId), page: pq.page, limit: pq.limit });
   }
 
-  @Get(':id') getOne(@Param('id', ParseIntPipe) id: number) { return this.svc.getOne(id); }
+  @Get(':id(\\d+)') getOne(@Param('id', ParseIntPipe) id: number) { return this.svc.getOne(id); }
 }
