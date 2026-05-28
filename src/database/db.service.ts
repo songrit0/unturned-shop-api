@@ -56,6 +56,83 @@ export class DbService implements OnModuleInit, OnModuleDestroy {
 
     // Price history (candle chart source)
     await this.ensurePriceHistory();
+
+    // P2P marketplace tables (migration 002)
+    await this.ensureP2PTables();
+
+    // sv_links Discord username cache (migration 003)
+    await this.ensureSvLinksUsername();
+  }
+
+  /** Idempotent migration — ensures sv_links has discord_username/global_name/updated_at columns. */
+  private async ensureSvLinksUsername() {
+    const dbName = this.cfg.get('db.database');
+    const linksBare = (this.cfg.get('db.svPrefix') || 'sv_') + 'links';
+    const cols: { col: string; ddl: string }[] = [
+      { col: 'discord_username',            ddl: `ADD COLUMN \`discord_username\` VARCHAR(64) DEFAULT NULL AFTER \`discord_id\`` },
+      { col: 'discord_global_name',         ddl: `ADD COLUMN \`discord_global_name\` VARCHAR(64) DEFAULT NULL AFTER \`discord_username\`` },
+      { col: 'discord_username_updated_at', ddl: `ADD COLUMN \`discord_username_updated_at\` DATETIME DEFAULT NULL AFTER \`discord_global_name\`` },
+    ];
+    for (const r of cols) {
+      try {
+        const exists = await this.first<{ c: number }>(
+          `SELECT COUNT(*) AS c FROM information_schema.COLUMNS
+           WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
+          [dbName, linksBare, r.col],
+        );
+        if (exists && Number(exists.c) > 0) continue;
+        await this.query(`ALTER TABLE \`${linksBare}\` ${r.ddl}`);
+        this.log.log(`Migration: added ${linksBare}.${r.col}`);
+      } catch (e: any) {
+        this.log.warn(`Migration ${linksBare}.${r.col} failed: ${e.message}`);
+      }
+    }
+  }
+
+  private async ensureP2PTables() {
+    const listings = this.table('sv', 'p2p_listings');
+    const logTable = this.table('sv', 'p2p_log');
+    try {
+      await this.query(
+        `CREATE TABLE IF NOT EXISTS ${listings} (
+          id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+          seller_steam CHAR(17) NOT NULL,
+          item_id INT UNSIGNED NOT NULL,
+          amount INT UNSIGNED NOT NULL,
+          quality TINYINT UNSIGNED NOT NULL,
+          rot TINYINT UNSIGNED NOT NULL DEFAULT 0,
+          state LONGTEXT NOT NULL,
+          price DOUBLE NOT NULL,
+          status ENUM('active','sold','cancelled','expired') NOT NULL DEFAULT 'active',
+          buyer_steam CHAR(17) DEFAULT NULL,
+          created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          closed_at DATETIME DEFAULT NULL,
+          PRIMARY KEY (id),
+          INDEX idx_seller (seller_steam),
+          INDEX idx_status_item (status, item_id),
+          INDEX idx_buyer (buyer_steam)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+      );
+    } catch (e: any) {
+      this.log.warn(`p2p_listings ensure failed: ${e.message}`);
+    }
+
+    try {
+      await this.query(
+        `CREATE TABLE IF NOT EXISTS ${logTable} (
+          id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+          listing_id BIGINT UNSIGNED NOT NULL,
+          action ENUM('list','buy','cancel','expire','admin_force_close') NOT NULL,
+          actor VARCHAR(64) NOT NULL,
+          meta JSON DEFAULT NULL,
+          at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (id),
+          INDEX idx_listing (listing_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+      );
+    } catch (e: any) {
+      this.log.warn(`p2p_log ensure failed: ${e.message}`);
+    }
   }
 
   private async ensurePriceHistory() {
@@ -382,6 +459,11 @@ export class DbService implements OnModuleInit, OnModuleDestroy {
       ? this.cfg.get('db.svPrefix')
       : this.cfg.get('db.rcPrefix');
     return `\`${prefix}${name}\``;
+  }
+
+  /** Quoted reference to a table without any prefix (e.g. MySQLVault's `Vaults`, `VaultsLocks`). */
+  tableRaw(name: string): string {
+    return `\`${name}\``;
   }
 
   async query<T = any>(sql: string, params?: any): Promise<T[]> {

@@ -4,7 +4,15 @@ import { JwtService } from '@nestjs/jwt';
 import { UsersService } from '../users/users.service';
 import { JwtPayload } from './strategies/jwt.strategy';
 
-export interface DiscordUser { id: string; username: string; avatar: string | null; }
+export interface DiscordUser {
+  id: string;
+  username: string;
+  /** Raw Discord username (login handle). */
+  discord_username?: string;
+  /** Discord display name (`global_name`), or null if unset. */
+  discord_global_name?: string | null;
+  avatar: string | null;
+}
 
 @Injectable()
 export class AuthService {
@@ -16,6 +24,15 @@ export class AuthService {
 
   async issueJwt(user: DiscordUser): Promise<{ token: string; payload: JwtPayload }> {
     const steamId = await this.users.findSteamByDiscord(user.id);
+    // Best-effort cache of the Discord identity on the existing sv_links row.
+    // No-op if the user hasn't linked yet — bot's /link flow handles row creation.
+    if (user.discord_username !== undefined) {
+      await this.users.updateDiscordNames(
+        user.id,
+        user.discord_username,
+        user.discord_global_name ?? null,
+      );
+    }
     const adminIds = this.cfg.get<string[]>('adminDiscordIds') || [];
     const payload: JwtPayload = {
       sub: user.id,

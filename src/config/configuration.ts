@@ -9,6 +9,7 @@ export interface AppConfig {
   ngrok: { authtoken: string; domain: string };
   firebase: { serviceAccountPath: string; apiUrlDoc: string };
   wealthTax: { percent: number; threshold: number; cron: string };
+  p2p: { commissionPercent: number; ttlDays: number; expireCron: string };
 }
 
 export default (): AppConfig => ({
@@ -48,5 +49,10 @@ export default (): AppConfig => ({
     percent: parseFloat(process.env.WEALTH_TAX_PERCENT || '0'),
     threshold: parseInt(process.env.WEALTH_TAX_THRESHOLD || '10000', 10),
     cron: process.env.WEALTH_TAX_CRON || '0 3 * * *',
+  },
+  p2p: {
+    commissionPercent: parseFloat(process.env.P2P_COMMISSION || '5'),
+    ttlDays: parseInt(process.env.P2P_TTL_DAYS || '7', 10),
+    expireCron: process.env.P2P_EXPIRE_CRON || '*/15 * * * *',
   },
 });

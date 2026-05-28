@@ -16,4 +16,29 @@ export class UsersService {
     );
     return row ? String(row.steam_id) : null;
   }
+
+  /**
+   * Cache the current Discord username + display name on the existing sv_links row.
+   * No-op when the user hasn't linked yet (row insert is owned by the bot's /link flow).
+   * Best-effort: swallows errors so a transient DB hiccup never blocks login.
+   */
+  async updateDiscordNames(
+    discordId: string,
+    username: string,
+    globalName: string | null,
+  ): Promise<void> {
+    const links = this.db.table('sv', 'links');
+    try {
+      await this.db.query(
+        `UPDATE ${links}
+            SET discord_username = ?,
+                discord_global_name = ?,
+                discord_username_updated_at = NOW()
+          WHERE discord_id = ?`,
+        [username, globalName, discordId],
+      );
+    } catch {
+      /* best-effort cache; ignore failures */
+    }
+  }
 }

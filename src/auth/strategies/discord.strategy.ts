@@ -24,6 +24,8 @@ export class DiscordStrategy extends PassportStrategy(Strategy, 'discord') {
     return {
       id: profile.id,
       username: profile.global_name || profile.username,
+      discord_username: profile.username,
+      discord_global_name: profile.global_name ?? null,
       avatar: profile.avatar,
     };
   }
