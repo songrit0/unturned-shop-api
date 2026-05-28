@@ -20,6 +20,7 @@ import { ItemsModule } from './items/items.module';
 import { MarketHistoryModule } from './market-history/market-history.module';
 import { VaultsModule } from './vaults/vaults.module';
 import { P2pModule } from './p2p/p2p.module';
+import { ItemsSubmissionsModule } from './items-submissions/items-submissions.module';
 import { HealthController } from './health/health.controller';
 import { VersionController } from './health/version.controller';
 
@@ -45,6 +46,7 @@ import { VersionController } from './health/version.controller';
     MarketHistoryModule,
     VaultsModule,
     P2pModule,
+    ItemsSubmissionsModule,
   ],
   controllers: [HealthController, VersionController],
 })
