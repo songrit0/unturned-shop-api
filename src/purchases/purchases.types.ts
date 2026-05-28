@@ -20,3 +20,18 @@ export interface PurchaseView extends PurchaseRow {
 }
 
 export type PurchaseFilter = 'unclaimed' | 'claimed' | 'all';
+
+export interface ClaimAllItem {
+  item_id: number;
+  item_name: string;
+  amount: number;
+  quality: number;
+}
+
+export interface ClaimAllResult {
+  /** The single shared redeem code, or null when nothing was claimable. */
+  redeem_code: string | null;
+  /** Number of purchases claimed into the code. */
+  count: number;
+  items: ClaimAllItem[];
+}

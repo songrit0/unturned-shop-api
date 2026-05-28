@@ -1,4 +1,5 @@
 import {
+  Body,
   Controller,
   ForbiddenException,
   Get,
@@ -8,7 +9,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { IsIn, IsInt, IsOptional, Min } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsIn, IsInt, IsOptional, IsPositive, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -17,10 +18,22 @@ import { UsersService } from '../users/users.service';
 import { PurchasesService } from './purchases.service';
 import { PurchaseFilter } from './purchases.types';
 
+/** Max purchases claimable in one request — caps lock duration on sv_p2p_purchases. */
+const CLAIM_ALL_MAX_IDS = 200;
+
 class ListMineQuery {
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) page?: number;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) limit?: number;
   @IsOptional() @IsIn(['unclaimed', 'claimed', 'all']) status?: PurchaseFilter;
+}
+
+class ClaimAllDto {
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(CLAIM_ALL_MAX_IDS)
+  @IsInt({ each: true })
+  @IsPositive({ each: true })
+  ids?: number[];
 }
 
 @Controller('purchases')
@@ -41,6 +54,13 @@ export class PurchasesController {
   async listMine(@CurrentUser() user: JwtPayload, @Query() q: ListMineQuery) {
     const steam = await this.requireSteam(user);
     return this.svc.listMine(steam, q.status ?? 'unclaimed', q.page, q.limit);
+  }
+
+  /** Claim all unclaimed purchases (optionally a subset via `ids`) into one redeem code. */
+  @Post('claim-all')
+  async claimAll(@CurrentUser() user: JwtPayload, @Body() body: ClaimAllDto) {
+    const steam = await this.requireSteam(user);
+    return this.svc.claimAll(steam, body.ids);
   }
 
   @Post(':id(\\d+)/claim')
