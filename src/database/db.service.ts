@@ -2,6 +2,14 @@ import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/commo
 import { ConfigService } from '@nestjs/config';
 import * as mysql from 'mysql2/promise';
 
+/** Connection-level errors that warrant a single retry — pool will hand us a fresh socket. */
+const TRANSIENT_DB_ERRORS = new Set([
+  'ECONNRESET',
+  'PROTOCOL_CONNECTION_LOST',
+  'ETIMEDOUT',
+  'EPIPE',
+]);
+
 @Injectable()
 export class DbService implements OnModuleInit, OnModuleDestroy {
   private readonly log = new Logger(DbService.name);
@@ -19,6 +27,11 @@ export class DbService implements OnModuleInit, OnModuleDestroy {
       // Steam IDs are 17-digit BIGINTs that overflow JS Number. Return them (and other big ints) as strings.
       supportBigNumbers: true,
       bigNumberStrings: true,
+      // Remote MySQL behind NAT/firewall — keep sockets warm so idle connections
+      // aren't silently dropped and don't surface as ECONNRESET on the next query.
+      enableKeepAlive: true,
+      keepAliveInitialDelay: 10000,
+      connectTimeout: 20000,
     });
     // sanity ping
     try {
@@ -528,8 +541,17 @@ export class DbService implements OnModuleInit, OnModuleDestroy {
   }
 
   async query<T = any>(sql: string, params?: any): Promise<T[]> {
-    const [rows] = await this.pool.query(sql, params);
-    return rows as T[];
+    try {
+      const [rows] = await this.pool.query(sql, params);
+      return rows as T[];
+    } catch (e: any) {
+      if (TRANSIENT_DB_ERRORS.has(e?.code)) {
+        this.log.warn(`MySQL transient error ${e.code}, retrying once`);
+        const [rows] = await this.pool.query(sql, params);
+        return rows as T[];
+      }
+      throw e;
+    }
   }
 
   async first<T = any>(sql: string, params?: any): Promise<T | null> {
