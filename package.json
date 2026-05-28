@@ -1,6 +1,6 @@
 {
   "name": "unturned-shop-api",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "NestJS API for the Unturned SellVault web shop (Discord login, market, coins).",
   "private": true,
   "scripts": {
