@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { DbService } from '../database/db.service';
+import { Paginated, normalizePage } from '../common/pagination';
 
 export type CandleInterval = '1m' | '5m' | '15m' | '1h' | '4h' | '1d';
 
@@ -44,14 +45,6 @@ export interface TransactionRow {
   amount: number;
   coins: number;
   price_per_unit: number;
-}
-
-export interface Paginated<T> {
-  items: T[];
-  total: number;
-  page: number;
-  limit: number;
-  pages: number;
 }
 
 @Injectable()
@@ -191,8 +184,8 @@ export class MarketHistoryService {
     };
   }
 
-  async transactionsForItem(itemId: number, page: number, limit: number): Promise<Paginated<TransactionRow>> {
-    const np = this.normPage(page, limit);
+  async transactionsForItem(itemId: number, page?: number, limit?: number): Promise<Paginated<TransactionRow>> {
+    const np = normalizePage(page, limit);
     const log = this.db.table('sv', 'market_log');
     const links = this.db.table('sv', 'links');
     const items = this.db.table('sv', 'items');
@@ -228,8 +221,8 @@ export class MarketHistoryService {
     return { items: items_out, total, page: np.page, limit: np.limit, pages: Math.ceil(total / np.limit) };
   }
 
-  async transactionsGlobal(page: number, limit: number, kind: 'buy' | 'sell' | 'all'): Promise<Paginated<TransactionRow>> {
-    const np = this.normPage(page, limit);
+  async transactionsGlobal(page: number | undefined, limit: number | undefined, kind: 'buy' | 'sell' | 'all'): Promise<Paginated<TransactionRow>> {
+    const np = normalizePage(page, limit);
     const log = this.db.table('sv', 'market_log');
     const links = this.db.table('sv', 'links');
     const items = this.db.table('sv', 'items');
@@ -273,9 +266,4 @@ export class MarketHistoryService {
     return { items: items_out, total, page: np.page, limit: np.limit, pages: Math.ceil(total / np.limit) };
   }
 
-  private normPage(page: any, limit: any): { page: number; limit: number; offset: number } {
-    const p = Math.max(1, parseInt(page, 10) || 1);
-    const l = Math.min(200, Math.max(1, parseInt(limit, 10) || 50));
-    return { page: p, limit: l, offset: (p - 1) * l };
-  }
 }

@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { DbService } from '../database/db.service';
+import { Paginated, normalizePage } from '../common/pagination';
 
 export interface Item {
   id: number;
@@ -22,13 +23,16 @@ export interface UpsertItemInput {
 export interface ItemListFilters {
   q?: string;
   type_id?: number | null;
+  page?: number;
+  limit?: number;
 }
 
 @Injectable()
 export class ItemsService {
   constructor(private readonly db: DbService) {}
 
-  async list(filters: ItemListFilters = {}): Promise<Item[]> {
+  async list(filters: ItemListFilters = {}): Promise<Paginated<Item>> {
+    const np = normalizePage(filters.page, filters.limit);
     const items = this.db.table('sv', 'items');
     const types = this.db.table('sv', 'item_types');
     const where: string[] = ['1=1'];
@@ -41,15 +45,25 @@ export class ItemsService {
       where.push('i.type_id = ?');
       params.push(filters.type_id);
     }
-    return this.db.query<Item>(
+    const whereSql = where.join(' AND ');
+
+    const cnt = await this.db.first<{ c: number }>(
+      `SELECT COUNT(*) AS c FROM ${items} i WHERE ${whereSql}`,
+      params,
+    );
+    const total = cnt ? Number(cnt.c) : 0;
+
+    const rows = await this.db.query<Item>(
       `SELECT i.id, i.name, i.description, i.image_url, i.type_id, t.name AS type_name,
               i.created_at, i.updated_at
        FROM ${items} i
        LEFT JOIN ${types} t ON t.id = i.type_id
-       WHERE ${where.join(' AND ')}
-       ORDER BY i.id ASC`,
-      params,
+       WHERE ${whereSql}
+       ORDER BY i.id ASC
+       LIMIT ? OFFSET ?`,
+      [...params, np.limit, np.offset],
     );
+    return { items: rows, total, page: np.page, limit: np.limit, pages: Math.ceil(total / np.limit) };
   }
 
   async getOne(id: number): Promise<Item> {

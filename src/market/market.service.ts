@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DbService } from '../database/db.service';
+import { Paginated, normalizePage } from '../common/pagination';
 
 export interface MarketItem {
   item_id: number;
@@ -25,7 +26,8 @@ export class MarketService {
     return this.cfg.get<number[]>('billItemIds') || [];
   }
 
-  async list(kind: MarketKind = 'normal', typeId?: number | null): Promise<MarketItem[]> {
+  async list(kind: MarketKind = 'normal', typeId?: number | null, page?: number, limit?: number): Promise<Paginated<MarketItem>> {
+    const np = normalizePage(page, limit);
     const market = this.db.table('sv', 'market');
     const items = this.db.table('sv', 'items');
     const itemTypes = this.db.table('sv', 'item_types');
@@ -35,7 +37,7 @@ export class MarketService {
     const params: any[] = [];
 
     if (kind === 'bills') {
-      if (ids.length === 0) return [];
+      if (ids.length === 0) return { items: [], total: 0, page: np.page, limit: np.limit, pages: 0 };
       where.push(`m.item_id IN (${ids.map(() => '?').join(',')})`);
       params.push(...ids);
     } else if (kind === 'normal' && ids.length > 0) {
@@ -48,16 +50,28 @@ export class MarketService {
       params.push(typeId);
     }
 
-    return this.db.query<MarketItem>(
+    const whereSql = where.join(' AND ');
+    const cnt = await this.db.first<{ c: number }>(
+      `SELECT COUNT(*) AS c
+       FROM ${market} m
+       LEFT JOIN ${items} i ON i.id = m.item_id
+       WHERE ${whereSql}`,
+      params,
+    );
+    const total = cnt ? Number(cnt.c) : 0;
+
+    const rows = await this.db.query<MarketItem>(
       `SELECT m.item_id, i.name, i.description, m.price, m.base_price, m.amount, m.target_stock,
               i.image_url, i.type_id, t.name AS type_name
        FROM ${market} m
        LEFT JOIN ${items} i ON i.id = m.item_id
        LEFT JOIN ${itemTypes} t ON t.id = i.type_id
-       WHERE ${where.join(' AND ')}
-       ORDER BY m.price ASC, i.name ASC`,
-      params,
+       WHERE ${whereSql}
+       ORDER BY m.price ASC, i.name ASC
+       LIMIT ? OFFSET ?`,
+      [...params, np.limit, np.offset],
     );
+    return { items: rows, total, page: np.page, limit: np.limit, pages: Math.ceil(total / np.limit) };
   }
 
   async listTypes(): Promise<Array<{ id: number; name: string; description: string | null }>> {

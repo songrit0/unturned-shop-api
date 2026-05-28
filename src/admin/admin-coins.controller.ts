@@ -4,6 +4,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { AdminGuard } from '../common/guards/admin.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtPayload } from '../auth/strategies/jwt.strategy';
+import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { AdminCoinsService } from './admin-coins.service';
 
 class AdjustDto {
@@ -31,8 +32,8 @@ export class AdminCoinsController {
   }
 
   @Get(':steamId/history')
-  history(@Param('steamId') steamId: string, @Query('limit') limit?: string) {
-    return this.svc.historyForUser(steamId, parseInt(limit!, 10) || 30);
+  history(@Param('steamId') steamId: string, @Query() q: PaginationQueryDto) {
+    return this.svc.historyForUser(steamId, q.page, q.limit);
   }
 
   @Post(':steamId/adjust')

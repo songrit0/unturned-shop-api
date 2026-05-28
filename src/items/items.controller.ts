@@ -4,6 +4,7 @@ import {
 import { IsInt, IsOptional, IsString, MaxLength, Min } from 'class-validator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { AdminGuard } from '../common/guards/admin.guard';
+import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { ItemsService } from './items.service';
 
 class CreateItemDto {
@@ -33,8 +34,8 @@ export class AdminItemsController {
   constructor(private readonly svc: ItemsService) {}
 
   @Get()
-  list(@Query('q') q?: string, @Query('type_id') typeId?: string) {
-    return this.svc.list({ q: q || undefined, type_id: parseIntQuery(typeId) });
+  list(@Query() pq: PaginationQueryDto, @Query('q') q?: string, @Query('type_id') typeId?: string) {
+    return this.svc.list({ q: q || undefined, type_id: parseIntQuery(typeId), page: pq.page, limit: pq.limit });
   }
 
   @Get(':id') getOne(@Param('id', ParseIntPipe) id: number) { return this.svc.getOne(id); }
@@ -67,8 +68,8 @@ export class ItemsController {
   constructor(private readonly svc: ItemsService) {}
 
   @Get()
-  list(@Query('type_id') typeId?: string, @Query('q') q?: string) {
-    return this.svc.list({ q: q || undefined, type_id: parseIntQuery(typeId) });
+  list(@Query() pq: PaginationQueryDto, @Query('type_id') typeId?: string, @Query('q') q?: string) {
+    return this.svc.list({ q: q || undefined, type_id: parseIntQuery(typeId), page: pq.page, limit: pq.limit });
   }
 
   @Get(':id') getOne(@Param('id', ParseIntPipe) id: number) { return this.svc.getOne(id); }

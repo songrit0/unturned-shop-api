@@ -11,6 +11,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { AdminGuard } from '../common/guards/admin.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtPayload } from '../auth/strategies/jwt.strategy';
+import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { UsersService } from '../users/users.service';
 import { QuestsService } from './quests.service';
 
@@ -36,7 +37,7 @@ class UpsertQuestDto {
 export class AdminQuestsController {
   constructor(private readonly svc: QuestsService) {}
 
-  @Get() list() { return this.svc.listAll(); }
+  @Get() list(@Query() q: PaginationQueryDto) { return this.svc.listAll(q.page, q.limit); }
   @Get(':id') getOne(@Param('id', ParseIntPipe) id: number) { return this.svc.getOne(id); }
 
   @Post()
@@ -83,11 +84,10 @@ export class QuestsController {
   }
 
   @Get('history')
-  async history(@CurrentUser() user: JwtPayload, @Query('limit') limit?: string) {
+  async history(@CurrentUser() user: JwtPayload, @Query() q: PaginationQueryDto) {
     const steamId = await this.users.findSteamByDiscord(user.sub);
     if (!steamId) throw new ForbiddenException('Steam account not linked');
-    const n = limit ? Math.min(Math.max(parseInt(limit, 10) || 50, 1), 200) : 50;
-    return this.svc.history(steamId, n);
+    return this.svc.history(steamId, q.page, q.limit);
   }
 
   @Get(':id')

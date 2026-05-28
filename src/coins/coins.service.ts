@@ -1,12 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { DbService } from '../database/db.service';
+import { Paginated, normalizePage } from '../common/pagination';
 
 export interface MarketLogRow {
   id: number; item_id: number; amount: number; coins: number;
   kind: 'buy' | 'sell' | string; at: Date; name?: string;
 }
 export interface ActivityLogRow { id: number; kind: string; coins: number; at: Date; }
-export interface Paginated<T> { items: T[]; total: number; page: number; limit: number; pages: number; }
 
 @Injectable()
 export class CoinsService {
@@ -21,14 +21,8 @@ export class CoinsService {
     return row ? Number(row.balance) : 0;
   }
 
-  private normPage(page: any, limit: any): { page: number; limit: number; offset: number } {
-    const p = Math.max(1, parseInt(page, 10) || 1);
-    const l = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
-    return { page: p, limit: l, offset: (p - 1) * l };
-  }
-
-  async marketHistory(steamId: string | null, page = 1, limit = 20): Promise<Paginated<MarketLogRow>> {
-    const np = this.normPage(page, limit);
+  async marketHistory(steamId: string | null, page?: number, limit?: number): Promise<Paginated<MarketLogRow>> {
+    const np = normalizePage(page, limit);
     if (!steamId) return { items: [], total: 0, page: np.page, limit: np.limit, pages: 0 };
     const log = this.db.table('sv', 'market_log');
     const itemsT = this.db.table('sv', 'items');
@@ -46,8 +40,8 @@ export class CoinsService {
     return { items, total, page: np.page, limit: np.limit, pages: Math.ceil(total / np.limit) };
   }
 
-  async activityHistory(steamId: string | null, page = 1, limit = 20): Promise<Paginated<ActivityLogRow>> {
-    const np = this.normPage(page, limit);
+  async activityHistory(steamId: string | null, page?: number, limit?: number): Promise<Paginated<ActivityLogRow>> {
+    const np = normalizePage(page, limit);
     if (!steamId) return { items: [], total: 0, page: np.page, limit: np.limit, pages: 0 };
     const log = this.db.table('sv', 'activity_log');
     try {

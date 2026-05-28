@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { DbService } from '../database/db.service';
+import { Paginated, normalizePage } from '../common/pagination';
 
 export interface CoinUserRow {
   steam_id: string;
@@ -13,12 +14,10 @@ export class AdminCoinsService {
   constructor(private readonly db: DbService) {}
 
   /** List all coin holders (paginated). */
-  async listUsers(page = 1, limit = 20, search = ''): Promise<{ items: CoinUserRow[]; total: number; page: number; limit: number; pages: number; }> {
+  async listUsers(page?: number, limit?: number, search = ''): Promise<Paginated<CoinUserRow>> {
     const coins = this.db.table('sv', 'coins');
     const links = this.db.table('sv', 'links');
-    const p = Math.max(1, parseInt(String(page), 10) || 1);
-    const l = Math.min(100, Math.max(1, parseInt(String(limit), 10) || 20));
-    const offset = (p - 1) * l;
+    const np = normalizePage(page, limit);
 
     const where: string[] = [];
     const params: any[] = [];
@@ -40,10 +39,10 @@ export class AdminCoinsService {
        ${whereSql}
        ORDER BY c.balance DESC
        LIMIT ? OFFSET ?`,
-      [...params, l, offset],
+      [...params, np.limit, np.offset],
     );
 
-    return { items, total, page: p, limit: l, pages: Math.ceil(total / l) };
+    return { items, total, page: np.page, limit: np.limit, pages: Math.ceil(total / np.limit) };
   }
 
   async getOne(steamId: string): Promise<CoinUserRow> {
@@ -102,11 +101,20 @@ export class AdminCoinsService {
     }
   }
 
-  async historyForUser(steamId: string, limit = 30) {
+  async historyForUser(steamId: string, page?: number, limit?: number): Promise<Paginated<{ id: number; kind: string; coins: number; at: Date }>> {
+    const np = normalizePage(page, limit);
     const log = this.db.table('sv', 'activity_log');
-    return this.db.query(
-      `SELECT id, kind, coins, at FROM ${log} WHERE steam_id = ? ORDER BY id DESC LIMIT ?`,
-      [steamId, Math.min(100, Math.max(1, limit))],
+
+    const cnt = await this.db.first<{ c: number }>(
+      `SELECT COUNT(*) AS c FROM ${log} WHERE steam_id = ?`,
+      [steamId],
     );
+    const total = cnt ? Number(cnt.c) : 0;
+
+    const items = await this.db.query<{ id: number; kind: string; coins: number; at: Date }>(
+      `SELECT id, kind, coins, at FROM ${log} WHERE steam_id = ? ORDER BY id DESC LIMIT ? OFFSET ?`,
+      [steamId, np.limit, np.offset],
+    );
+    return { items, total, page: np.page, limit: np.limit, pages: Math.ceil(total / np.limit) };
   }
 }

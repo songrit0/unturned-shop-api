@@ -1,6 +1,7 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { DbService } from '../database/db.service';
 import { periodKey, QuestResetType } from '../common/period-key';
+import { Paginated, normalizePage } from '../common/pagination';
 
 /** Convert an ISO-8601 string from the frontend into a Date that mysql2 will
  *  serialize to MySQL DATETIME. Returns null for null/undefined/empty/invalid. */
@@ -75,14 +76,20 @@ export class QuestsService {
 
   // -------- admin --------
 
-  async listAll(): Promise<QuestWithItems[]> {
+  async listAll(page?: number, limit?: number): Promise<Paginated<QuestWithItems>> {
+    const np = normalizePage(page, limit);
     const quests = this.db.table('sv', 'quests');
     const items = this.db.table('sv', 'quest_items');
+
+    const cnt = await this.db.first<{ c: number }>(`SELECT COUNT(*) AS c FROM ${quests}`);
+    const total = cnt ? Number(cnt.c) : 0;
+
     const rows = await this.db.query<QuestRow>(
       `SELECT id, name, description, reward_coins, reset_type, enabled, start_at, end_at, created_at, updated_at
-       FROM ${quests} ORDER BY id ASC`,
+       FROM ${quests} ORDER BY id ASC LIMIT ? OFFSET ?`,
+      [np.limit, np.offset],
     );
-    if (rows.length === 0) return [];
+    if (rows.length === 0) return { items: [], total, page: np.page, limit: np.limit, pages: Math.ceil(total / np.limit) };
     const ids = rows.map((r) => r.id);
     const catalog = this.db.table('sv', 'items');
     const itemRows = await this.db.query<QuestItem & { quest_id: number }>(
@@ -98,7 +105,8 @@ export class QuestsService {
       arr.push({ item_id: it.item_id, qty_required: it.qty_required, item_name: it.item_name ?? null });
       byQuest.set(it.quest_id, arr);
     }
-    return rows.map((r) => ({ ...r, items: byQuest.get(r.id) || [] }));
+    const items_out = rows.map((r) => ({ ...r, items: byQuest.get(r.id) || [] }));
+    return { items: items_out, total, page: np.page, limit: np.limit, pages: Math.ceil(total / np.limit) };
   }
 
   async getOne(id: number): Promise<QuestWithItems> {
@@ -312,17 +320,26 @@ export class QuestsService {
     };
   }
 
-  async history(steamId: string, limit = 50): Promise<QuestCompletionRow[]> {
+  async history(steamId: string, page?: number, limit?: number): Promise<Paginated<QuestCompletionRow>> {
+    const np = normalizePage(page, limit);
     const compT = this.db.table('sv', 'quest_completions');
     const questsT = this.db.table('sv', 'quests');
-    return this.db.query<QuestCompletionRow>(
+
+    const cnt = await this.db.first<{ c: number }>(
+      `SELECT COUNT(*) AS c FROM ${compT} WHERE steam_id = ?`,
+      [steamId],
+    );
+    const total = cnt ? Number(cnt.c) : 0;
+
+    const items = await this.db.query<QuestCompletionRow>(
       `SELECT c.quest_id, q.name, c.period_key, c.reward_coins, c.completed_at
        FROM ${compT} c
        LEFT JOIN ${questsT} q ON q.id = c.quest_id
        WHERE c.steam_id = ?
        ORDER BY c.completed_at DESC
-       LIMIT ?`,
-      [steamId, limit],
+       LIMIT ? OFFSET ?`,
+      [steamId, np.limit, np.offset],
     );
+    return { items, total, page: np.page, limit: np.limit, pages: Math.ceil(total / np.limit) };
   }
 }

@@ -1,6 +1,7 @@
 import { BadRequestException, Controller, Get, NotFoundException, Param, ParseIntPipe, Query } from '@nestjs/common';
 import { MarketService, MarketKind } from './market.service';
 import { MarketHistoryService, CandleInterval } from '../market-history/market-history.service';
+import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 
 const CANDLE_INTERVALS: CandleInterval[] = ['1m', '5m', '15m', '1h', '4h', '1d'];
 
@@ -18,16 +19,20 @@ export class MarketController {
     private readonly history: MarketHistoryService,
   ) {}
 
-  /** GET /market?type=normal|bills|all&type_id=<id>  (default: normal — excludes cash bills) */
+  /** GET /market?type=normal|bills|all&type_id=<id>&page=&limit=  (default: normal — excludes cash bills) */
   @Get()
-  list(@Query('type') type?: string, @Query('type_id') typeId?: string) {
+  list(
+    @Query() pq: PaginationQueryDto,
+    @Query('type') type?: string,
+    @Query('type_id') typeId?: string,
+  ) {
     const kind: MarketKind = type === 'bills' || type === 'all' ? type : 'normal';
     let tid: number | null = null;
     if (typeId != null && typeId !== '' && typeId !== 'null') {
       const parsed = parseInt(typeId, 10);
       if (Number.isFinite(parsed) && parsed > 0) tid = parsed;
     }
-    return this.market.list(kind, tid);
+    return this.market.list(kind, tid, pq.page, pq.limit);
   }
 
   /** GET /market/types — public read-only list of sv_item_types. Declared before :id to avoid route collision. */

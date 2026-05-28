@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { DbService } from '../database/db.service';
+import { Paginated, normalizePage } from '../common/pagination';
 
 export interface ItemType {
   id: number;
@@ -17,9 +18,18 @@ export interface UpsertItemTypeInput {
 export class ItemTypesService {
   constructor(private readonly db: DbService) {}
 
-  async listAll(): Promise<ItemType[]> {
+  async listAll(page?: number, limit?: number): Promise<Paginated<ItemType>> {
+    const np = normalizePage(page, limit);
     const t = this.db.table('sv', 'item_types');
-    return this.db.query<ItemType>(`SELECT id, name, description, created_at FROM ${t} ORDER BY name ASC`);
+
+    const cnt = await this.db.first<{ c: number }>(`SELECT COUNT(*) AS c FROM ${t}`);
+    const total = cnt ? Number(cnt.c) : 0;
+
+    const items = await this.db.query<ItemType>(
+      `SELECT id, name, description, created_at FROM ${t} ORDER BY name ASC LIMIT ? OFFSET ?`,
+      [np.limit, np.offset],
+    );
+    return { items, total, page: np.page, limit: np.limit, pages: Math.ceil(total / np.limit) };
   }
 
   async getOne(id: number): Promise<ItemType> {

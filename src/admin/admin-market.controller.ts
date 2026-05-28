@@ -1,7 +1,8 @@
-import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Put, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { IsBoolean, IsInt, IsNumber, IsOptional, Max, Min } from 'class-validator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { AdminGuard } from '../common/guards/admin.guard';
+import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { AdminMarketService } from './admin-market.service';
 
 class UpsertMarketDto {
@@ -20,7 +21,7 @@ class ToggleDto { @IsBoolean() enabled!: boolean; }
 export class AdminMarketController {
   constructor(private readonly svc: AdminMarketService) {}
 
-  @Get() list() { return this.svc.listAll(); }
+  @Get() list(@Query() q: PaginationQueryDto) { return this.svc.listAll(q.page, q.limit); }
   @Get(':id') getOne(@Param('id', ParseIntPipe) id: number) { return this.svc.getOne(id); }
 
   @Post()

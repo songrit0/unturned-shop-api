@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { DbService } from '../database/db.service';
 import { PricingService } from '../pricing/pricing.service';
+import { Paginated, normalizePage } from '../common/pagination';
 
 export interface AdminMarketItem {
   item_id: number;
@@ -43,9 +44,16 @@ export class AdminMarketService {
     return { sql, params };
   }
 
-  async listAll(): Promise<AdminMarketItem[]> {
-    const { sql, params } = this.joinedSelect(`ORDER BY m.item_id ASC`, []);
-    return this.db.query<AdminMarketItem>(sql, params);
+  async listAll(page?: number, limit?: number): Promise<Paginated<AdminMarketItem>> {
+    const np = normalizePage(page, limit);
+    const market = this.db.table('sv', 'market');
+
+    const cnt = await this.db.first<{ c: number }>(`SELECT COUNT(*) AS c FROM ${market}`);
+    const total = cnt ? Number(cnt.c) : 0;
+
+    const { sql, params } = this.joinedSelect(`ORDER BY m.item_id ASC LIMIT ? OFFSET ?`, [np.limit, np.offset]);
+    const items = await this.db.query<AdminMarketItem>(sql, params);
+    return { items, total, page: np.page, limit: np.limit, pages: Math.ceil(total / np.limit) };
   }
 
   async upsert(i: UpsertInput): Promise<AdminMarketItem> {

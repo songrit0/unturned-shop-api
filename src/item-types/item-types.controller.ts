@@ -1,7 +1,8 @@
-import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Put, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { IsOptional, IsString, MaxLength } from 'class-validator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { AdminGuard } from '../common/guards/admin.guard';
+import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { AdminMarketService } from '../admin/admin-market.service';
 import { ItemTypesService } from './item-types.service';
 
@@ -19,7 +20,7 @@ class SetMarketTypeDto {
 export class AdminItemTypesController {
   constructor(private readonly svc: ItemTypesService) {}
 
-  @Get() list() { return this.svc.listAll(); }
+  @Get() list(@Query() q: PaginationQueryDto) { return this.svc.listAll(q.page, q.limit); }
   @Get(':id') getOne(@Param('id', ParseIntPipe) id: number) { return this.svc.getOne(id); }
 
   @Post()
