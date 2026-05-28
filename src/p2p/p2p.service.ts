@@ -188,13 +188,13 @@ export class P2pService {
    * - Lock listing row (status check)
    * - Debit buyer's sv_coins (full price)
    * - Credit seller's sv_coins (price - commission)
-   * - Insert item into buyer's default vault (creating row if missing)
+   * - INSERT sv_p2p_purchases row (buyer claims later via /purchases/:id/claim)
    * - Mark listing sold
    */
   async buyListing(buyerSteam: string, listingId: number): Promise<P2PListingView> {
     const conn = await this.db.getConnection();
     try {
-      // Pre-load listing without lock to get seller for vault lock ordering
+      // Pre-load listing for early rejection (final source of truth is the FOR UPDATE inside txn)
       const pre = await this.getListing(listingId);
       if (pre.seller_steam === buyerSteam) {
         throw new BadRequestException('cannot_buy_own_listing');
@@ -203,12 +203,8 @@ export class P2pService {
         throw new ConflictException('listing_no_longer_active');
       }
 
-      // Acquire buyer's vault lock first (default vault is where we deposit)
-      await this.vaults.acquireLock(conn, buyerSteam, DEFAULT_VAULT);
+      await conn.beginTransaction();
       try {
-        await conn.beginTransaction();
-
-        // 1. Re-lock listing inside txn
         const [lrows] = await conn.query<mysql.RowDataPacket[]>(
           `SELECT * FROM ${this.listingsTbl()} WHERE id = ? FOR UPDATE`, [listingId],
         );
@@ -227,7 +223,7 @@ export class P2pService {
         const commission = Math.round((price * this.commissionPct() / 100));
         const sellerProceeds = Math.max(0, Math.round(price) - commission);
 
-        // 2. Debit buyer (atomic: UPDATE...WHERE balance >= price)
+        // Debit buyer (atomic: UPDATE ... WHERE balance >= price)
         const [debit] = await conn.query<mysql.ResultSetHeader>(
           `UPDATE ${this.coinsTbl()} SET balance = balance - ? WHERE steam_id = ? AND balance >= ?`,
           [Math.round(price), buyerSteam, Math.round(price)],
@@ -237,50 +233,23 @@ export class P2pService {
           throw new HttpException('insufficient_funds', HttpStatus.PAYMENT_REQUIRED);
         }
 
-        // 3. Credit seller (upsert: row may not exist)
+        // Credit seller (upsert: row may not exist)
         await conn.query(
           `INSERT INTO ${this.coinsTbl()} (steam_id, balance) VALUES (?, ?)
            ON DUPLICATE KEY UPDATE balance = balance + VALUES(balance)`,
           [listing.seller_steam, sellerProceeds],
         );
 
-        // 4. Insert item into buyer's default vault
-        const [vrows] = await conn.query<mysql.RowDataPacket[]>(
-          `SELECT Data FROM ${this.vaults.vaultsTbl()} WHERE OwnerId = ? AND Name = ? FOR UPDATE`,
-          [buyerSteam, DEFAULT_VAULT],
+        // Record the unclaimed purchase. The buyer redeems it later via /purchases/:id/claim
+        // which mints the redeem code; we deliberately do not touch Vaults here.
+        await conn.query(
+          `INSERT INTO ${this.db.table('sv', 'p2p_purchases')}
+             (buyer_steam, listing_id, item_id, amount, quality, state, rot)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [buyerSteam, listingId, listing.item_id, listing.amount, listing.quality, listing.state, listing.rot],
         );
-        let vaultItems: VaultItem[] = [];
-        if (vrows.length > 0) {
-          vaultItems = this.vaults.parseVaultData((vrows[0] as any).Data);
-        }
-        const incoming: VaultItem = {
-          X: 0, Y: 0, Rot: listing.rot,
-          Amount: listing.amount, Quality: listing.quality,
-          State: listing.state, Id: listing.item_id,
-        };
-        vaultItems.push(incoming);
-        const newData = this.vaults.serializeVaultData(vaultItems);
 
-        if (vrows.length === 0) {
-          // Create vault row for buyer. Owner name resolved from sv_links if available.
-          const [link] = await conn.query<mysql.RowDataPacket[]>(
-            `SELECT discord_id FROM ${this.linksTbl()} WHERE steam_id = ? LIMIT 1`, [buyerSteam],
-          );
-          const ownerName = (link[0] as any)?.discord_id ?? null;
-          await conn.query(
-            `INSERT INTO ${this.vaults.vaultsTbl()} (OwnerId, Name, OwnerName, Data, LastUpdate)
-             VALUES (?, ?, ?, ?, NOW())`,
-            [buyerSteam, DEFAULT_VAULT, ownerName, newData],
-          );
-        } else {
-          await conn.query(
-            `UPDATE ${this.vaults.vaultsTbl()} SET Data = ?, LastUpdate = NOW()
-             WHERE OwnerId = ? AND Name = ?`,
-            [newData, buyerSteam, DEFAULT_VAULT],
-          );
-        }
-
-        // 5. Close listing
+        // Close listing
         await conn.query(
           `UPDATE ${this.listingsTbl()} SET status='sold', buyer_steam=?, closed_at=NOW() WHERE id = ?`,
           [buyerSteam, listingId],
@@ -293,8 +262,6 @@ export class P2pService {
       } catch (e) {
         try { await conn.rollback(); } catch { /* ignore */ }
         throw e;
-      } finally {
-        await this.vaults.releaseLock(conn, buyerSteam, DEFAULT_VAULT);
       }
     } finally {
       conn.release();

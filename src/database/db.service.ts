@@ -65,6 +65,36 @@ export class DbService implements OnModuleInit, OnModuleDestroy {
 
     // Item info submissions (migration 004)
     await this.ensureItemSubmissionsTable();
+
+    // P2P purchases (migration 005)
+    await this.ensureP2PPurchasesTable();
+  }
+
+  private async ensureP2PPurchasesTable() {
+    const purchases = this.table('sv', 'p2p_purchases');
+    try {
+      await this.query(
+        `CREATE TABLE IF NOT EXISTS ${purchases} (
+          id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+          buyer_steam CHAR(17) NOT NULL,
+          listing_id BIGINT UNSIGNED NOT NULL,
+          item_id INT UNSIGNED NOT NULL,
+          amount INT UNSIGNED NOT NULL,
+          quality TINYINT UNSIGNED NOT NULL,
+          state LONGTEXT NOT NULL,
+          rot TINYINT UNSIGNED NOT NULL DEFAULT 0,
+          purchased_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          claimed_at DATETIME DEFAULT NULL,
+          redeem_code VARCHAR(64) DEFAULT NULL,
+          PRIMARY KEY (id),
+          INDEX idx_buyer (buyer_steam),
+          INDEX idx_listing (listing_id),
+          INDEX idx_unclaimed (buyer_steam, claimed_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+      );
+    } catch (e: any) {
+      this.log.warn(`p2p_purchases ensure failed: ${e.message}`);
+    }
   }
 
   private async ensureItemSubmissionsTable() {
