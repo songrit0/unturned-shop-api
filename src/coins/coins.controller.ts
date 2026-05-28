@@ -17,6 +17,12 @@ export class CoinsController {
     return { steam_id: steamId, linked: !!steamId, balance };
   }
 
+  @Get('stats')
+  async stats(@CurrentUser() user: JwtPayload) {
+    const steamId = await this.users.findSteamByDiscord(user.sub);
+    return this.coins.stats(steamId, 7);
+  }
+
   @Get('history/market')
   async marketHistory(
     @CurrentUser() user: JwtPayload,

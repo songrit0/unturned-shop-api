@@ -7,6 +7,7 @@ export interface MarketLogRow {
   kind: 'buy' | 'sell' | string; at: Date; name?: string;
 }
 export interface ActivityLogRow { id: number; kind: string; coins: number; at: Date; }
+export interface CoinStats { window_days: number; net_change: number; credits: number; debits: number; }
 
 @Injectable()
 export class CoinsService {
@@ -38,6 +39,36 @@ export class CoinsService {
       [steamId, np.limit, np.offset],
     );
     return { items, total, page: np.page, limit: np.limit, pages: Math.ceil(total / np.limit) };
+  }
+
+  async stats(steamId: string | null, windowDays = 7): Promise<CoinStats> {
+    const empty: CoinStats = { window_days: windowDays, net_change: 0, credits: 0, debits: 0 };
+    if (!steamId) return empty;
+    const marketLog = this.db.table('sv', 'market_log');
+    const activityLog = this.db.table('sv', 'activity_log');
+    try {
+      const row = await this.db.first<{ credits: number | null; debits: number | null; net: number | null }>(
+        `SELECT
+           COALESCE(SUM(CASE WHEN coins > 0 THEN coins ELSE 0 END), 0) AS credits,
+           COALESCE(SUM(CASE WHEN coins < 0 THEN coins ELSE 0 END), 0) AS debits,
+           COALESCE(SUM(coins), 0) AS net
+         FROM (
+           SELECT coins FROM ${marketLog} WHERE steam_id = ? AND at >= NOW() - INTERVAL ? DAY
+           UNION ALL
+           SELECT coins FROM ${activityLog} WHERE steam_id = ? AND at >= NOW() - INTERVAL ? DAY
+         ) AS combined`,
+        [steamId, windowDays, steamId, windowDays],
+      );
+      if (!row) return empty;
+      return {
+        window_days: windowDays,
+        net_change: Number(row.net ?? 0),
+        credits: Number(row.credits ?? 0),
+        debits: Number(row.debits ?? 0),
+      };
+    } catch {
+      return empty;
+    }
   }
 
   async activityHistory(steamId: string | null, page?: number, limit?: number): Promise<Paginated<ActivityLogRow>> {
