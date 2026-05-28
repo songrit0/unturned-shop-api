@@ -105,34 +105,49 @@ export class ItemsSubmissionsService {
       (patch.type_id !== undefined && patch.type_id !== null);
     if (!hasAny) throw new BadRequestException('nothing_to_submit');
 
-    // Ensure the item exists; otherwise FK-less INSERT would still accept it.
-    const itemRow = await this.db.first<{ id: number }>(
-      `SELECT id FROM ${this.itemsTbl()} WHERE id = ? LIMIT 1`, [itemId],
-    );
-    if (!itemRow) throw new NotFoundException('Item not found');
-
-    try {
-      const res: any = await this.db.query(
-        `INSERT INTO ${this.subsTbl()}
-           (item_id, submitter_steam, name, description, image_url, type_id, status)
-         VALUES (?, ?, ?, ?, ?, ?, 'pending')`,
-        [
-          itemId,
-          submitterSteam,
-          patch.name ?? null,
-          patch.description ?? null,
-          patch.image_url ?? null,
-          patch.type_id ?? null,
-        ],
-      );
-      const id = Number(res?.insertId ?? 0);
-      return this.getById(id);
-    } catch (e: any) {
-      if (e?.code === 'ER_DUP_ENTRY') {
-        throw new ConflictException('already_submitted');
-      }
-      throw e;
+    if (!Number.isInteger(itemId) || itemId < 1 || itemId > 65535) {
+      throw new BadRequestException('invalid_item_id');
     }
+
+    // sv_items acts as the master ledger of known item IDs. If this is the first
+    // time anyone has referenced this ID, create a blank row so admin approve can
+    // later fill it in via COALESCE. Wrapped with the submission INSERT so a
+    // duplicate submitter doesn't leave a stray sv_items row behind.
+    const conn = await this.db.getConnection();
+    let newId = 0;
+    try {
+      await conn.beginTransaction();
+      await conn.query(`INSERT IGNORE INTO ${this.itemsTbl()} (id) VALUES (?)`, [itemId]);
+      try {
+        const [res] = await conn.query<any>(
+          `INSERT INTO ${this.subsTbl()}
+             (item_id, submitter_steam, name, description, image_url, type_id, status)
+           VALUES (?, ?, ?, ?, ?, ?, 'pending')`,
+          [
+            itemId,
+            submitterSteam,
+            patch.name ?? null,
+            patch.description ?? null,
+            patch.image_url ?? null,
+            patch.type_id ?? null,
+          ],
+        );
+        newId = Number((res as any)?.insertId ?? 0);
+      } catch (e: any) {
+        if (e?.code === 'ER_DUP_ENTRY') {
+          await conn.rollback();
+          throw new ConflictException('already_submitted');
+        }
+        throw e;
+      }
+      await conn.commit();
+    } catch (e) {
+      try { await conn.rollback(); } catch { /* ignore */ }
+      throw e;
+    } finally {
+      conn.release();
+    }
+    return this.getById(newId);
   }
 
   async getById(id: number): Promise<ItemSubmission> {
