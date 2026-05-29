@@ -14,6 +14,13 @@ export interface P2PListingRow {
   buyer_steam: string | null;
   created_at: Date;
   closed_at: Date | null;
+  /**
+   * Refund redeem code minted when the listing was cancelled/expired/force-closed.
+   * Null for active/sold listings (and pre-rework closed listings). Single-use, expiring.
+   */
+  redeem_code: string | null;
+  /** Expiry of `redeem_code` (MySQL DATETIME), or null. */
+  code_expires_at: Date | null;
 }
 
 export interface P2PListingView extends P2PListingRow {

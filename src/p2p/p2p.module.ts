@@ -5,9 +5,10 @@ import { P2pExpireService } from './p2p-expire.service';
 import { AdminP2pController, P2pConfigController, P2pController } from './p2p.controller';
 import { UsersModule } from '../users/users.module';
 import { VaultsModule } from '../vaults/vaults.module';
+import { PurchasesModule } from '../purchases/purchases.module';
 
 @Module({
-  imports: [ScheduleModule.forRoot(), UsersModule, VaultsModule],
+  imports: [ScheduleModule.forRoot(), UsersModule, VaultsModule, PurchasesModule],
   controllers: [P2pController, AdminP2pController, P2pConfigController],
   providers: [P2pService, P2pExpireService],
   exports: [P2pService],

@@ -5,11 +5,13 @@ export interface AppConfig {
   billItemIds: number[];
   discord: { clientId: string; clientSecret: string; redirectUri: string };
   jwt: { secret: string; expiresIn: string };
+  /** Shared secret for bot->API service calls (X-Bot-Secret). Empty disables the bot endpoints (fail closed). */
+  botApiSecret: string;
   adminDiscordIds: string[];
   ngrok: { authtoken: string; domain: string };
   firebase: { serviceAccountPath: string; apiUrlDoc: string };
   wealthTax: { percent: number; threshold: number; cron: string };
-  p2p: { commissionPercent: number; ttlDays: number; expireCron: string };
+  p2p: { commissionPercent: number; ttlDays: number; expireCron: string; refundCodeTtlDays: number };
 }
 
 export default (): AppConfig => ({
@@ -33,6 +35,8 @@ export default (): AppConfig => ({
     secret: process.env.JWT_SECRET || 'dev-secret-change-me',
     expiresIn: process.env.JWT_EXPIRES || '7d',
   },
+  // No default: an unset/empty secret makes BotGuard fail closed (bot endpoints reject all).
+  botApiSecret: process.env.BOT_API_SECRET || '',
   adminDiscordIds: (process.env.ADMIN_DISCORD_IDS || '')
     .split(',').map(s => s.trim()).filter(Boolean),
   billItemIds: (process.env.BILL_ITEM_IDS || '4254,4255,4256,4257,4258')
@@ -54,5 +58,7 @@ export default (): AppConfig => ({
     commissionPercent: parseFloat(process.env.P2P_COMMISSION || '5'),
     ttlDays: parseInt(process.env.P2P_TTL_DAYS || '7', 10),
     expireCron: process.env.P2P_EXPIRE_CRON || '*/15 * * * *',
+    // Lifetime of the refund redeem code minted when a listing is cancelled/expired/force-closed.
+    refundCodeTtlDays: parseInt(process.env.P2P_REFUND_CODE_TTL_DAYS || '7', 10),
   },
 });

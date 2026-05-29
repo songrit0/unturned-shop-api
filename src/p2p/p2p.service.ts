@@ -13,6 +13,7 @@ import * as mysql from 'mysql2/promise';
 import { DbService } from '../database/db.service';
 import { VaultsService } from '../vaults/vaults.service';
 import { VaultItem } from '../vaults/vaults.types';
+import { PurchasesService } from '../purchases/purchases.service';
 import { Paginated, normalizePage } from '../common/pagination';
 import {
   CreateListingInput,
@@ -22,8 +23,6 @@ import {
   P2PListingView,
 } from './p2p.types';
 
-const DEFAULT_VAULT = 'default';
-
 @Injectable()
 export class P2pService {
   private readonly log = new Logger(P2pService.name);
@@ -32,6 +31,7 @@ export class P2pService {
     private readonly db: DbService,
     private readonly vaults: VaultsService,
     private readonly cfg: ConfigService,
+    private readonly purchases: PurchasesService,
   ) {}
 
   private listingsTbl() { return this.db.table('sv', 'p2p_listings'); }
@@ -269,36 +269,69 @@ export class P2pService {
     return this.getListing(listingId);
   }
 
-  /** Seller cancels — item returned to their default vault. */
-  async cancelListing(sellerSteam: string, listingId: number): Promise<P2PListingView> {
-    return this.closeAndReturn(listingId, sellerSteam, 'cancel', sellerSteam);
+  /**
+   * Buy a listing AND immediately mint the redeem code (instant delivery for the Discord
+   * Buy button). Composes the existing buyListing + PurchasesService.claim — no duplicated
+   * coin/code logic. The buy commits first; if the subsequent claim somehow fails, the buyer
+   * still owns the (unclaimed) purchase and can claim it later via /purchases.
+   */
+  async buyAndClaim(
+    buyerSteam: string,
+    listingId: number,
+  ): Promise<{ redeem_code: string | null; item_name: string | null; amount: number; price: number }> {
+    const listing = await this.buyListing(buyerSteam, listingId);
+    const purchase = await this.purchases.findUnclaimedByListing(listingId, buyerSteam);
+    if (!purchase) {
+      // buyListing succeeded but we can't locate the purchase to claim — should not happen.
+      // Don't fail the buy (coins already moved); surface no code — buyer claims via /purchases.
+      this.log.warn(`buyAndClaim(${listingId}): no unclaimed purchase found post-buy for ${buyerSteam}`);
+      return { redeem_code: null, item_name: listing.item_name, amount: Number(listing.amount), price: Number(listing.price) };
+    }
+    const claimed = await this.purchases.claim(Number(purchase.id), buyerSteam);
+    return {
+      redeem_code: claimed.redeem_code,
+      item_name: claimed.item_name ?? listing.item_name,
+      amount: Number(claimed.amount),
+      price: Number(listing.price),
+    };
   }
 
-  /** Admin force-close — refund item to seller, log actor. */
+  /** Seller cancels — held item is refunded as an expiring redeem code (not returned to vault). */
+  async cancelListing(sellerSteam: string, listingId: number): Promise<P2PListingView> {
+    return this.closeAndRefund(listingId, sellerSteam, 'cancel', sellerSteam);
+  }
+
+  /** Admin force-close — refund held item to seller as an expiring redeem code, log actor. */
   async adminForceClose(listingId: number, actor: string): Promise<P2PListingView> {
-    return this.closeAndReturn(listingId, null, 'admin_force_close', actor);
+    return this.closeAndRefund(listingId, null, 'admin_force_close', actor);
   }
 
   /**
-   * Shared close path: returns item to seller's default vault, sets terminal status.
+   * Shared close path. Instead of returning the held item to the seller's vault, this mints a
+   * single-use refund redeem code (rc_codes + rc_code_items, owned by the seller via sv_code_owners)
+   * with an expiry of P2P_REFUND_CODE_TTL_DAYS, then records a sv_notifications row so the web inbox
+   * and the Discord bot can surface the code to the seller. All work happens in one transaction.
    * @param requireSellerMatch — if non-null, the caller must equal seller_steam (cancel flow).
    */
-  private async closeAndReturn(
+  private async closeAndRefund(
     listingId: number,
     requireSellerMatch: string | null,
     action: Extract<P2PAction, 'cancel' | 'admin_force_close' | 'expire'>,
     actor: string,
   ): Promise<P2PListingView> {
+    const ttlDays = this.refundCodeTtlDays();
     const conn = await this.db.getConnection();
-    let listingSeller = '';
+    // Captured inside the txn, used for the best-effort notification AFTER commit.
+    let sellerSteam = '';
+    let itemId = 0;
+    let amount = 0;
+    let quality = 0;
+    let code = '';
+    let codeExpiresAt: string | null = null;
+    let codeExpiresAtUnix: number | null = null;
     try {
-      // Look up seller first (so we know whose vault lock to take)
-      const pre = await this.getListing(listingId);
-      listingSeller = pre.seller_steam;
-
-      await this.vaults.acquireLock(conn, listingSeller, DEFAULT_VAULT);
+      await conn.beginTransaction();
       try {
-        await conn.beginTransaction();
         const [lrows] = await conn.query<mysql.RowDataPacket[]>(
           `SELECT * FROM ${this.listingsTbl()} WHERE id = ? FOR UPDATE`, [listingId],
         );
@@ -312,63 +345,125 @@ export class P2pService {
           await conn.rollback();
           throw new ForbiddenException('not_listing_owner');
         }
+        sellerSteam = listing.seller_steam;
+        itemId = Number(listing.item_id);
+        amount = Number(listing.amount);
+        quality = Number(listing.quality);
 
-        // Return item to seller's default vault
-        const [vrows] = await conn.query<mysql.RowDataPacket[]>(
-          `SELECT Data FROM ${this.vaults.vaultsTbl()} WHERE OwnerId = ? AND Name = ? FOR UPDATE`,
-          [listing.seller_steam, DEFAULT_VAULT],
-        );
-        const incoming: VaultItem = {
-          X: 0, Y: 0, Rot: listing.rot,
-          Amount: listing.amount, Quality: listing.quality,
-          State: listing.state, Id: listing.item_id,
-        };
-        let vaultItems: VaultItem[] = [];
-        if (vrows.length > 0) {
-          vaultItems = this.vaults.parseVaultData((vrows[0] as any).Data);
-        }
-        vaultItems.push(incoming);
-        const newData = this.vaults.serializeVaultData(vaultItems);
-        if (vrows.length === 0) {
-          const [link] = await conn.query<mysql.RowDataPacket[]>(
-            `SELECT discord_id FROM ${this.linksTbl()} WHERE steam_id = ? LIMIT 1`,
-            [listing.seller_steam],
-          );
-          const ownerName = (link[0] as any)?.discord_id ?? null;
-          await conn.query(
-            `INSERT INTO ${this.vaults.vaultsTbl()} (OwnerId, Name, OwnerName, Data, LastUpdate)
-             VALUES (?, ?, ?, ?, NOW())`,
-            [listing.seller_steam, DEFAULT_VAULT, ownerName, newData],
-          );
-        } else {
-          await conn.query(
-            `UPDATE ${this.vaults.vaultsTbl()} SET Data = ?, LastUpdate = NOW()
-             WHERE OwnerId = ? AND Name = ?`,
-            [newData, listing.seller_steam, DEFAULT_VAULT],
-          );
-        }
-
-        const finalStatus = action === 'cancel'
-          ? 'cancelled'
-          : action === 'expire'
-            ? 'expired'
-            : 'cancelled';
+        // 1) Mint a single-use refund code carrying the held item, expiring in ttlDays.
+        const { code: minted, codeId } = await this.purchases.insertNewCode(conn, ttlDays);
+        code = minted;
         await conn.query(
-          `UPDATE ${this.listingsTbl()} SET status=?, closed_at=NOW() WHERE id = ?`,
-          [finalStatus, listingId],
+          `INSERT INTO ${this.db.table('rc', 'code_items')} (code_id, item_id, amount, quality, state, rot)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [codeId, listing.item_id, listing.amount, listing.quality, listing.state, listing.rot],
         );
-        await this.writeLog(conn, listingId, action, actor, null);
+        await conn.query(
+          `INSERT INTO ${this.db.table('sv', 'code_owners')} (code_id, steam_id) VALUES (?, ?)`,
+          [codeId, listing.seller_steam],
+        );
+        // Read the code's expiry back from the MySQL clock for the listing row + notification payload.
+        // Also fetch epoch seconds via UNIX_TIMESTAMP so the bot can render a TZ-unambiguous
+        // Discord relative timestamp (the ISO string is for the web).
+        const codeRow = await this.firstOnConn<{ expires_at: string | null; expires_at_unix: number | string | null }>(
+          conn,
+          `SELECT expires_at, UNIX_TIMESTAMP(expires_at) AS expires_at_unix
+             FROM ${this.db.table('rc', 'codes')} WHERE id = ?`,
+          [codeId],
+        );
+        codeExpiresAt = codeRow?.expires_at ?? null;
+        codeExpiresAtUnix = codeRow?.expires_at_unix != null ? Number(codeRow.expires_at_unix) : null;
+
+        // 2) Close the listing, stamping the minted code + its expiry directly on the row
+        //    so my-listings can surface it without depending on the notification.
+        const finalStatus = action === 'expire' ? 'expired' : 'cancelled';
+        await conn.query(
+          `UPDATE ${this.listingsTbl()}
+              SET status=?, closed_at=NOW(), redeem_code=?, code_expires_at=?
+            WHERE id = ?`,
+          [finalStatus, code, codeExpiresAt, listingId],
+        );
+        await this.writeLog(conn, listingId, action, actor, { refund_code: code, code_expires_at: codeExpiresAt });
+
+        // The atomic core (code mint + listing close + log) commits here. The notification
+        // below is intentionally OUTSIDE this txn so a not-yet-applied 006 migration can't
+        // break cancel/expire — the seller always has the code via /codes + the listing row.
         await conn.commit();
       } catch (e) {
         try { await conn.rollback(); } catch { /* ignore */ }
         throw e;
-      } finally {
-        await this.vaults.releaseLock(conn, listingSeller, DEFAULT_VAULT);
       }
     } finally {
       conn.release();
     }
+
+    // 3) Best-effort notification (web inbox + bot DM source). Never throws into the close path:
+    //    on any failure (missing sv_notifications table, unlinked seller, etc.) we log and move on.
+    try {
+      const itemMeta = await this.db.first<{ item_name: string | null; image_url: string | null }>(
+        `SELECT name AS item_name, image_url FROM ${this.itemsTbl()} WHERE id = ?`,
+        [itemId],
+      );
+      const link = await this.db.first<{ discord_id: string | null }>(
+        `SELECT discord_id FROM ${this.linksTbl()} WHERE steam_id = ? LIMIT 1`,
+        [sellerSteam],
+      );
+      const discordId = link?.discord_id ?? null;
+      if (discordId == null) {
+        this.log.warn(
+          `closeAndRefund(${listingId}): seller ${sellerSteam} has no linked discord_id; minted code ${code} but skipped notification`,
+        );
+      } else {
+        const payload = {
+          listing_id: listingId,
+          item_id: itemId,
+          item_name: itemMeta?.item_name ?? null,
+          image_url: itemMeta?.image_url ?? null,
+          amount,
+          quality,
+          code,
+          code_expires_at: codeExpiresAt,
+          code_expires_at_unix: codeExpiresAtUnix,
+        };
+        await this.db.query(
+          `INSERT INTO ${this.notificationsTbl()} (discord_id, steam_id, kind, payload)
+           VALUES (?, ?, ?, ?)`,
+          [discordId, sellerSteam, this.notificationKind(action), JSON.stringify(payload)],
+        );
+      }
+    } catch (e: any) {
+      this.log.warn(
+        `closeAndRefund(${listingId}): notification insert failed (code ${code} minted + listing closed): ${e.message}`,
+      );
+    }
+
     return this.getListing(listingId);
+  }
+
+  private notificationsTbl() { return this.db.table('sv', 'notifications'); }
+
+  /** TTL (days) for the refund redeem code minted on cancel/expire/force-close. */
+  private refundCodeTtlDays(): number {
+    const v = Number(this.cfg.get<number>('p2p.refundCodeTtlDays') ?? 7);
+    return Number.isFinite(v) && v > 0 ? Math.floor(v) : 7;
+  }
+
+  private notificationKind(action: Extract<P2PAction, 'cancel' | 'admin_force_close' | 'expire'>): string {
+    switch (action) {
+      case 'expire': return 'p2p_expired';
+      case 'admin_force_close': return 'p2p_force_closed';
+      default: return 'p2p_cancelled';
+    }
+  }
+
+  /** first() against an in-transaction connection (DbService.first uses the pool, not this conn). */
+  private async firstOnConn<T = any>(
+    conn: mysql.PoolConnection,
+    sql: string,
+    params?: any,
+  ): Promise<T | null> {
+    const [rows] = await conn.query<mysql.RowDataPacket[]>(sql, params);
+    return (rows[0] as T) ?? null;
   }
 
   /** Find all active listings older than the TTL — used by the expire cron. */
@@ -381,10 +476,10 @@ export class P2pService {
     );
   }
 
-  /** Cron entry: expire one listing back to the seller's vault. */
+  /** Cron entry: expire one listing, refunding the held item as an expiring redeem code. */
   async expireOne(listingId: number): Promise<void> {
     try {
-      await this.closeAndReturn(listingId, null, 'expire', 'cron');
+      await this.closeAndRefund(listingId, null, 'expire', 'cron');
     } catch (e: any) {
       this.log.warn(`expireOne(${listingId}) failed: ${e.message}`);
     }

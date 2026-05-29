@@ -22,6 +22,8 @@ import { VaultsModule } from './vaults/vaults.module';
 import { P2pModule } from './p2p/p2p.module';
 import { ItemsSubmissionsModule } from './items-submissions/items-submissions.module';
 import { PurchasesModule } from './purchases/purchases.module';
+import { NotificationsModule } from './notifications/notifications.module';
+import { BotModule } from './bot/bot.module';
 import { HealthController } from './health/health.controller';
 import { VersionController } from './health/version.controller';
 
@@ -49,6 +51,8 @@ import { VersionController } from './health/version.controller';
     P2pModule,
     ItemsSubmissionsModule,
     PurchasesModule,
+    NotificationsModule,
+    BotModule,
   ],
   controllers: [HealthController, VersionController],
 })

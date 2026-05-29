@@ -67,6 +67,20 @@ export class PurchasesService {
   }
 
   /**
+   * The unclaimed purchase a buyer obtained from a given listing. A listing sells exactly once
+   * (status flips to 'sold' atomically in buyListing), so there is at most one such row.
+   * Used by the P2P buy-and-claim flow to locate the purchase to mint a code for.
+   */
+  async findUnclaimedByListing(listingId: number, buyerSteam: string): Promise<PurchaseRow | null> {
+    return this.db.first<PurchaseRow>(
+      `SELECT * FROM ${this.purchasesTbl()}
+        WHERE listing_id = ? AND buyer_steam = ? AND claimed_at IS NULL
+        ORDER BY id DESC LIMIT 1`,
+      [listingId, buyerSteam],
+    );
+  }
+
+  /**
    * Mint a redeem code for an unclaimed purchase owned by the caller.
    * Atomic across: claim purchase row, insert rc_codes (with collision retry),
    * insert rc_code_items, insert sv_code_owners, stamp purchase with code/timestamp.
@@ -196,12 +210,25 @@ export class PurchasesService {
     return out;
   }
 
-  private async insertNewCode(conn: mysql.PoolConnection): Promise<{ code: string; codeId: number }> {
+  /**
+   * Mint a fresh single-use rc_codes row on the given connection, retrying on code collisions.
+   * Shared by the purchase-claim flows (no expiry) and the P2P refund flow (expiry in days).
+   * @param expiresInDays when > 0, sets expires_at = NOW() + N days (MySQL clock); otherwise NULL (never expires).
+   */
+  async insertNewCode(
+    conn: mysql.PoolConnection,
+    expiresInDays?: number,
+  ): Promise<{ code: string; codeId: number }> {
+    const withExpiry = typeof expiresInDays === 'number' && expiresInDays > 0;
     for (let attempt = 0; attempt < CODE_INSERT_RETRIES; attempt++) {
       const code = this.generateCode();
       try {
         const [res] = await conn.query<mysql.ResultSetHeader>(
-          `INSERT INTO ${this.codesTbl()} (code, max_uses) VALUES (?, 1)`, [code],
+          withExpiry
+            ? `INSERT INTO ${this.codesTbl()} (code, max_uses, expires_at)
+               VALUES (?, 1, DATE_ADD(NOW(), INTERVAL ? DAY))`
+            : `INSERT INTO ${this.codesTbl()} (code, max_uses) VALUES (?, 1)`,
+          withExpiry ? [code, Math.floor(expiresInDays as number)] : [code],
         );
         return { code, codeId: Number(res.insertId) };
       } catch (e: any) {
