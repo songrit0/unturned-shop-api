@@ -100,7 +100,8 @@ export class AdminP2pController {
 
   @Post(':id/force-close')
   forceClose(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: JwtPayload) {
-    return this.p2p.adminForceClose(id, user.sub);
+    // actor is for the audit log; admins always have a discord sub, fall back defensively.
+    return this.p2p.adminForceClose(id, user.sub ?? 'admin');
   }
 }
 

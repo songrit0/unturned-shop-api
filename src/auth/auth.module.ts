@@ -7,10 +7,12 @@ import { AuthService } from './auth.service';
 import { DiscordStrategy } from './strategies/discord.strategy';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { UsersModule } from '../users/users.module';
+import { WebPinModule } from '../web-pin/web-pin.module';
 
 @Module({
   imports: [
     UsersModule,
+    WebPinModule,
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.registerAsync({
       imports: [ConfigModule],

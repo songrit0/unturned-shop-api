@@ -42,6 +42,6 @@ export class AdminCoinsController {
     @Param('steamId') steamId: string,
     @Body() body: AdjustDto,
   ) {
-    return this.svc.adjust(steamId, body.delta, admin.sub, body.reason || '');
+    return this.svc.adjust(steamId, body.delta, admin.sub ?? 'admin', body.reason || '');
   }
 }

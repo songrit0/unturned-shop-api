@@ -4,11 +4,14 @@ import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 
 export interface JwtPayload {
-  sub: string;          // discord_id
+  /** discord_id for Discord logins; for steam_pin logins it's the linked discord_id, or null if unlinked. */
+  sub: string | null;
   username: string;
   avatar: string | null;
   steam_id: string | null;
   is_admin: boolean;
+  /** How the token was obtained. Absent on legacy tokens (treat as 'discord'). */
+  login_method?: 'discord' | 'steam_pin';
   iat?: number;
   exp?: number;
 }

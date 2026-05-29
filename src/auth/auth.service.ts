@@ -40,6 +40,28 @@ export class AuthService {
       avatar: user.avatar,
       steam_id: steamId,
       is_admin: adminIds.includes(user.id),
+      login_method: 'discord',
+    };
+    const token = await this.jwt.signAsync(payload);
+    return { token, payload };
+  }
+
+  /**
+   * Mint a JWT for a Steam-ID + PIN login. Caller must have already verified the PIN.
+   * steam_id is the authenticated steam; sub is the linked discord_id if the steam is linked
+   * (reverse sv_links lookup), else null. is_admin is true only when the linked discord_id is
+   * in ADMIN_DISCORD_IDS; an unlinked steam can never be admin.
+   */
+  async issueSteamJwt(steamId: string): Promise<{ token: string; payload: JwtPayload }> {
+    const discordId = await this.users.findDiscordBySteam(steamId);
+    const adminIds = this.cfg.get<string[]>('adminDiscordIds') || [];
+    const payload: JwtPayload = {
+      sub: discordId,
+      username: `steam:${steamId}`,
+      avatar: null,
+      steam_id: steamId,
+      is_admin: discordId != null && adminIds.includes(discordId),
+      login_method: 'steam_pin',
     };
     const token = await this.jwt.signAsync(payload);
     return { token, payload };

@@ -7,14 +7,25 @@ export interface LinkRow { steam_id: string; discord_id: string; linked_at: Date
 export class UsersService {
   constructor(private readonly db: DbService) {}
 
-  /** Returns the linked steam_id for a discord_id, or null if not linked yet. */
-  async findSteamByDiscord(discordId: string): Promise<string | null> {
+  /** Returns the linked steam_id for a discord_id, or null if not linked yet (or discordId is null). */
+  async findSteamByDiscord(discordId: string | null): Promise<string | null> {
+    if (!discordId) return null;
     const links = this.db.table('sv', 'links');
     const row = await this.db.first<LinkRow>(
       `SELECT steam_id FROM ${links} WHERE discord_id=:d LIMIT 1`,
       { d: discordId },
     );
     return row ? String(row.steam_id) : null;
+  }
+
+  /** Returns the linked discord_id for a steam_id, or null if not linked. Reverse of findSteamByDiscord. */
+  async findDiscordBySteam(steamId: string): Promise<string | null> {
+    const links = this.db.table('sv', 'links');
+    const row = await this.db.first<LinkRow>(
+      `SELECT discord_id FROM ${links} WHERE steam_id=:s LIMIT 1`,
+      { s: steamId },
+    );
+    return row ? String(row.discord_id) : null;
   }
 
   /**

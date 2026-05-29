@@ -1,8 +1,18 @@
-import { Body, Controller, Delete, Get, HttpCode, Post, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  ForbiddenException,
+  Get,
+  HttpCode,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
 import { IsInt, IsOptional, Min } from 'class-validator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtPayload } from '../auth/strategies/jwt.strategy';
+import { UsersService } from '../users/users.service';
 import { BasketService } from './basket.service';
 
 class BasketItemDto {
@@ -18,44 +28,61 @@ class BasketSetDto {
 @Controller('basket')
 @UseGuards(JwtAuthGuard)
 export class BasketController {
-  constructor(private readonly basket: BasketService) {}
+  constructor(
+    private readonly basket: BasketService,
+    private readonly users: UsersService,
+  ) {}
+
+  /**
+   * The basket is keyed on steam_id, so it works for both Discord and steam-pin logins.
+   * The steam-pin JWT carries steam_id directly; a Discord JWT may need the sv_links lookup.
+   */
+  private async requireSteam(user: JwtPayload): Promise<string> {
+    const steam = user.steam_id ?? (await this.users.findSteamByDiscord(user.sub));
+    if (!steam) throw new ForbiddenException('Account not linked to Steam');
+    return steam;
+  }
 
   @Get()
-  view(@CurrentUser() user: JwtPayload) {
-    return this.basket.view(user.sub);
+  async view(@CurrentUser() user: JwtPayload) {
+    return this.basket.view(await this.requireSteam(user));
   }
 
   @Post('add')
   @HttpCode(200)
   async add(@CurrentUser() user: JwtPayload, @Body() body: BasketItemDto) {
-    this.basket.add(user.sub, body.item_id, body.qty || 1);
-    return this.basket.view(user.sub);
+    const steam = await this.requireSteam(user);
+    this.basket.add(steam, body.item_id, body.qty || 1);
+    return this.basket.view(steam);
   }
 
   @Post('set')
   @HttpCode(200)
   async setQty(@CurrentUser() user: JwtPayload, @Body() body: BasketSetDto) {
-    this.basket.setQty(user.sub, body.item_id, body.qty);
-    return this.basket.view(user.sub);
+    const steam = await this.requireSteam(user);
+    this.basket.setQty(steam, body.item_id, body.qty);
+    return this.basket.view(steam);
   }
 
   @Post('remove')
   @HttpCode(200)
   async remove(@CurrentUser() user: JwtPayload, @Body() body: BasketItemDto) {
-    this.basket.remove(user.sub, body.item_id);
-    return this.basket.view(user.sub);
+    const steam = await this.requireSteam(user);
+    this.basket.remove(steam, body.item_id);
+    return this.basket.view(steam);
   }
 
   @Delete()
   @HttpCode(200)
   async clear(@CurrentUser() user: JwtPayload) {
-    this.basket.clear(user.sub);
-    return this.basket.view(user.sub);
+    const steam = await this.requireSteam(user);
+    this.basket.clear(steam);
+    return this.basket.view(steam);
   }
 
   @Post('checkout')
   @HttpCode(200)
-  checkout(@CurrentUser() user: JwtPayload) {
-    return this.basket.checkout(user.sub);
+  async checkout(@CurrentUser() user: JwtPayload) {
+    return this.basket.checkout(await this.requireSteam(user));
   }
 }

@@ -19,8 +19,10 @@ export class NotificationsService {
   }
 
   /** Page of the caller's notifications, newest first. */
-  async listForRecipient(discordId: string, page?: number, limit?: number): Promise<Paginated<NotificationView>> {
+  async listForRecipient(discordId: string | null, page?: number, limit?: number): Promise<Paginated<NotificationView>> {
     const np = normalizePage(page, limit);
+    // A steam-only (unlinked) login has no discord recipient -> no notifications.
+    if (!discordId) return { items: [], total: 0, page: np.page, limit: np.limit, pages: 0 };
     const cnt = await this.db.first<{ c: number }>(
       `SELECT COUNT(*) AS c FROM ${this.tbl()} WHERE discord_id = ?`, [discordId],
     );
@@ -40,7 +42,8 @@ export class NotificationsService {
   }
 
   /** Count of unread notifications for the caller. */
-  async unreadCount(discordId: string): Promise<number> {
+  async unreadCount(discordId: string | null): Promise<number> {
+    if (!discordId) return 0;
     const row = await this.db.first<{ c: number }>(
       `SELECT COUNT(*) AS c FROM ${this.tbl()} WHERE discord_id = ? AND read_at IS NULL`,
       [discordId],
@@ -53,7 +56,8 @@ export class NotificationsService {
    * or belongs to someone else yields 404 (no information leak about other users' rows).
    * Idempotent: re-marking an already-read row is a no-op success.
    */
-  async markRead(id: number, discordId: string): Promise<{ ok: true }> {
+  async markRead(id: number, discordId: string | null): Promise<{ ok: true }> {
+    if (!discordId) throw new NotFoundException('Notification not found');
     const res: any = await this.db.query(
       `UPDATE ${this.tbl()} SET read_at = COALESCE(read_at, NOW())
         WHERE id = ? AND discord_id = ?`,

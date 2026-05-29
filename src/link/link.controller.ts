@@ -1,4 +1,4 @@
-import { Controller, Post, UseGuards } from '@nestjs/common';
+import { Controller, ForbiddenException, Post, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtPayload } from '../auth/strategies/jwt.strategy';
@@ -12,6 +12,8 @@ export class LinkController {
   /** POST /link/welcome — generate (or reuse) a one-time /link code for the current Discord user. */
   @Post('welcome')
   async welcome(@CurrentUser() user: JwtPayload) {
+    // Linking is inherently Discord-side; a steam-only (unlinked) login has no discord_id.
+    if (!user.sub) throw new ForbiddenException('discord_required');
     return this.link.createWelcomeCode(user.sub);
   }
 }

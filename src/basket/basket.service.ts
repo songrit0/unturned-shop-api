@@ -1,7 +1,6 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { randomBytes } from 'crypto';
 import { DbService } from '../database/db.service';
-import { UsersService } from '../users/users.service';
 import { PricingService } from '../pricing/pricing.service';
 
 const CODE_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -11,27 +10,26 @@ export interface BasketView { items: BasketItem[]; total: number; }
 
 export type CheckoutResult =
   | { ok: true; code: string; total: number; items: { item_id: number; name: string; qty: number }[] }
-  | { ok: false; reason: 'not_linked' | 'empty' | 'no_item' | 'out_of_stock' | 'insufficient'; detail?: any };
+  | { ok: false; reason: 'empty' | 'no_item' | 'out_of_stock' | 'insufficient'; detail?: any };
 
 @Injectable()
 export class BasketService {
-  /** In-memory baskets keyed by discord_id. Cleared on checkout or process restart. */
+  /** In-memory baskets keyed by steam_id. Cleared on checkout or process restart. */
   private baskets = new Map<string, Map<number, number>>();
 
   constructor(
     private readonly db: DbService,
-    private readonly users: UsersService,
     private readonly pricing: PricingService,
   ) {}
 
-  private get(discordId: string): Map<number, number> {
-    let b = this.baskets.get(discordId);
-    if (!b) { b = new Map(); this.baskets.set(discordId, b); }
+  private get(steamId: string): Map<number, number> {
+    let b = this.baskets.get(steamId);
+    if (!b) { b = new Map(); this.baskets.set(steamId, b); }
     return b;
   }
 
-  async view(discordId: string): Promise<BasketView> {
-    const b = this.get(discordId);
+  async view(steamId: string): Promise<BasketView> {
+    const b = this.get(steamId);
     if (b.size === 0) return { items: [], total: 0 };
 
     const ids = [...b.keys()];
@@ -58,23 +56,23 @@ export class BasketService {
     return { items, total };
   }
 
-  add(discordId: string, itemId: number, qty = 1) {
-    const b = this.get(discordId);
+  add(steamId: string, itemId: number, qty = 1) {
+    const b = this.get(steamId);
     b.set(itemId, (b.get(itemId) || 0) + qty);
   }
 
-  setQty(discordId: string, itemId: number, qty: number) {
-    const b = this.get(discordId);
+  setQty(steamId: string, itemId: number, qty: number) {
+    const b = this.get(steamId);
     if (qty <= 0) b.delete(itemId);
     else b.set(itemId, qty);
   }
 
-  remove(discordId: string, itemId: number) {
-    this.get(discordId).delete(itemId);
+  remove(steamId: string, itemId: number) {
+    this.get(steamId).delete(itemId);
   }
 
-  clear(discordId: string) {
-    this.baskets.delete(discordId);
+  clear(steamId: string) {
+    this.baskets.delete(steamId);
   }
 
   private genCode(n = 10): string {
@@ -87,12 +85,10 @@ export class BasketService {
   /**
    * Atomic checkout: lock market rows, verify stock + coins, deduct, decrement stock, create rc_codes
    * + rc_code_items, insert sv_market_log. Mirrors the Discord bot's `buy_basket`.
+   * Keyed on steam_id, so it works for both Discord and steam-pin logins.
    */
-  async checkout(discordId: string): Promise<CheckoutResult> {
-    const steamId = await this.users.findSteamByDiscord(discordId);
-    if (!steamId) return { ok: false, reason: 'not_linked' };
-
-    const b = this.get(discordId);
+  async checkout(steamId: string): Promise<CheckoutResult> {
+    const b = this.get(steamId);
     if (b.size === 0) return { ok: false, reason: 'empty' };
 
     const items = [...b.entries()].map(([item_id, qty]) => ({ item_id, qty }));
@@ -162,7 +158,7 @@ export class BasketService {
       }
 
       await conn.commit();
-      this.clear(discordId);
+      this.clear(steamId);
       // Recompute live prices for items whose stock just changed
       this.pricing.recomputeFor(purchased.map(p => p.item_id)).catch(() => {});
       return { ok: true, code, total, items: purchased.map(p => ({ item_id: p.item_id, name: p.name, qty: p.qty })) };
