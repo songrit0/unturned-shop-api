@@ -81,6 +81,55 @@ export class DbService implements OnModuleInit, OnModuleDestroy {
 
     // P2P purchases (migration 005)
     await this.ensureP2PPurchasesTable();
+
+    // VIP system tables (shared with the VIP plugin + Discord shop)
+    await this.ensureVipTables();
+  }
+
+  private async ensureVipTables() {
+    const packages = this.table('sv', 'vip_packages');
+    const grants = this.table('sv', 'vip_grants');
+    const logTable = this.table('sv', 'vip_log');
+    try {
+      await this.query(
+        `CREATE TABLE IF NOT EXISTS ${packages} (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          tier VARCHAR(32) NOT NULL,
+          group_id VARCHAR(64) NOT NULL,
+          days INT NOT NULL,
+          price_coins BIGINT NOT NULL,
+          label VARCHAR(64) NULL,
+          sort INT NOT NULL DEFAULT 0,
+          enabled TINYINT(1) NOT NULL DEFAULT 1
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+      );
+      await this.query(
+        `CREATE TABLE IF NOT EXISTS ${grants} (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          steam_id BIGINT UNSIGNED NOT NULL,
+          group_id VARCHAR(64) NOT NULL,
+          expires_at DATETIME NOT NULL,
+          active TINYINT(1) NOT NULL DEFAULT 1,
+          updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          UNIQUE KEY uniq_steam_group (steam_id, group_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+      );
+      await this.query(
+        `CREATE TABLE IF NOT EXISTS ${logTable} (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          steam_id BIGINT UNSIGNED NOT NULL,
+          group_id VARCHAR(64) NOT NULL,
+          action VARCHAR(16) NOT NULL,
+          days INT NOT NULL DEFAULT 0,
+          actor VARCHAR(64) NULL,
+          at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          INDEX idx_steam (steam_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+      );
+      this.log.log('VIP tables ready (sv_vip_packages / sv_vip_grants / sv_vip_log)');
+    } catch (e: any) {
+      this.log.warn(`vip tables ensure failed: ${e.message}`);
+    }
   }
 
   private async ensureP2PPurchasesTable() {

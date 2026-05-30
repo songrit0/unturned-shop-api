@@ -24,6 +24,7 @@ import { ItemsSubmissionsModule } from './items-submissions/items-submissions.mo
 import { PurchasesModule } from './purchases/purchases.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { BotModule } from './bot/bot.module';
+import { VipModule } from './vip/vip.module';
 import { HealthController } from './health/health.controller';
 import { VersionController } from './health/version.controller';
 
@@ -53,6 +54,7 @@ import { VersionController } from './health/version.controller';
     PurchasesModule,
     NotificationsModule,
     BotModule,
+    VipModule,
   ],
   controllers: [HealthController, VersionController],
 })
