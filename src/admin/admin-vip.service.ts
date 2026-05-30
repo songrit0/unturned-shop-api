@@ -163,27 +163,35 @@ export class AdminVipService {
     return this.oneGrant(steamId, groupId);
   }
 
-  /** Set an absolute expiry (UTC). active becomes 1 if it's in the future, else 0. */
+  /**
+   * Set an absolute expiry (UTC). Always keeps active=1 — the VIP plugin is the single authority that
+   * flips active=0, and it does so AFTER removing the player from the RocketMod group. So a past date
+   * here = "let the plugin remove them"; a future date = "(re)grant". Setting active=0 directly here
+   * would make the plugin skip the removal and leave them in the group in-game.
+   */
   async setExpiry(steamId: string, groupId: string, expiresAtUtc: string, actor: string): Promise<VipGrantRow> {
     if (!groupId?.trim()) throw new BadRequestException('group_id required');
     const d = new Date(expiresAtUtc);
     if (isNaN(d.getTime())) throw new BadRequestException('expires_at must be a valid date');
-    const active = d.getTime() > Date.now() ? 1 : 0;
     const mysqlDt = d.toISOString().slice(0, 19).replace('T', ' '); // UTC 'YYYY-MM-DD HH:MM:SS'
     await this.db.query(
       `INSERT INTO ${this.grantTable()} (steam_id, group_id, expires_at, active)
-       VALUES (?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE expires_at = VALUES(expires_at), active = VALUES(active)`,
-      [steamId, groupId, mysqlDt, active],
+       VALUES (?, ?, ?, 1)
+       ON DUPLICATE KEY UPDATE expires_at = VALUES(expires_at), active = 1`,
+      [steamId, groupId, mysqlDt],
     );
     await this.log(steamId, groupId, 'set', 0, actor);
     return this.oneGrant(steamId, groupId);
   }
 
-  /** Revoke now: active=0, expires_at=now. The plugin removes the group on its next sweep. */
+  /**
+   * Revoke now: expires_at=now but KEEP active=1 so the plugin's expiry sweep picks it up
+   * (active=1 AND expired), removes the player from the group, and only THEN sets active=0.
+   * Setting active=0 here directly would leave them in the group in-game.
+   */
   async revoke(steamId: string, groupId: string, actor: string): Promise<{ revoked: boolean }> {
     await this.db.query(
-      `UPDATE ${this.grantTable()} SET active = 0, expires_at = UTC_TIMESTAMP()
+      `UPDATE ${this.grantTable()} SET active = 1, expires_at = UTC_TIMESTAMP()
        WHERE steam_id = ? AND group_id = ?`,
       [steamId, groupId],
     );
