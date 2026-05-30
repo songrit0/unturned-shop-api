@@ -1,0 +1,204 @@
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { DbService } from '../database/db.service';
+import { Paginated, normalizePage } from '../common/pagination';
+
+export interface VipPackageRow {
+  id: number;
+  tier: string;
+  group_id: string;
+  days: number;
+  price_coins: number;
+  label: string | null;
+  sort: number;
+  enabled: number;
+}
+
+export interface VipGrantRow {
+  id: number;
+  steam_id: string;
+  group_id: string;
+  expires_at: Date;
+  active: number;
+  updated_at: Date;
+}
+
+export interface VipPackageInput {
+  tier: string;
+  group_id: string;
+  days: number;
+  price_coins: number;
+  label?: string;
+  sort?: number;
+  enabled?: boolean;
+}
+
+/**
+ * Admin management for the VIP system. Writes the sv_vip_* tables that the VIP Unturned plugin
+ * reconciles against (it adds/removes the RocketMod group within ~1 min of a change). All expiry
+ * times are UTC, matching the plugin's UTC_TIMESTAMP() usage.
+ */
+@Injectable()
+export class AdminVipService {
+  constructor(private readonly db: DbService) {}
+
+  private pkgTable() { return this.db.table('sv', 'vip_packages'); }
+  private grantTable() { return this.db.table('sv', 'vip_grants'); }
+  private logTable() { return this.db.table('sv', 'vip_log'); }
+
+  // ---- packages ----
+
+  async listPackages(): Promise<VipPackageRow[]> {
+    return this.db.query<VipPackageRow>(
+      `SELECT id, tier, group_id, days, price_coins, label, sort, enabled
+       FROM ${this.pkgTable()} ORDER BY sort ASC, price_coins ASC`,
+    );
+  }
+
+  async createPackage(input: VipPackageInput): Promise<VipPackageRow> {
+    this.validatePackage(input);
+    const res: any = await this.db.query(
+      `INSERT INTO ${this.pkgTable()} (tier, group_id, days, price_coins, label, sort, enabled)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        input.tier, input.group_id, input.days, input.price_coins,
+        input.label ?? null, input.sort ?? 0, input.enabled === false ? 0 : 1,
+      ],
+    );
+    const id = (res as any)?.insertId ?? (Array.isArray(res) ? (res[0] as any)?.insertId : undefined);
+    return this.getPackage(Number(id));
+  }
+
+  async getPackage(id: number): Promise<VipPackageRow> {
+    const row = await this.db.first<VipPackageRow>(
+      `SELECT id, tier, group_id, days, price_coins, label, sort, enabled
+       FROM ${this.pkgTable()} WHERE id = ? LIMIT 1`,
+      [id],
+    );
+    if (!row) throw new NotFoundException('Package not found');
+    return row;
+  }
+
+  async updatePackage(id: number, input: Partial<VipPackageInput>): Promise<VipPackageRow> {
+    await this.getPackage(id); // 404 if missing
+    const sets: string[] = [];
+    const params: any[] = [];
+    const map: Record<string, any> = {
+      tier: input.tier, group_id: input.group_id, days: input.days,
+      price_coins: input.price_coins, label: input.label, sort: input.sort,
+      enabled: input.enabled === undefined ? undefined : input.enabled ? 1 : 0,
+    };
+    for (const [col, val] of Object.entries(map)) {
+      if (val !== undefined) { sets.push(`${col} = ?`); params.push(val); }
+    }
+    if (sets.length === 0) return this.getPackage(id);
+    params.push(id);
+    await this.db.query(`UPDATE ${this.pkgTable()} SET ${sets.join(', ')} WHERE id = ?`, params);
+    return this.getPackage(id);
+  }
+
+  async deletePackage(id: number): Promise<{ deleted: boolean }> {
+    await this.getPackage(id);
+    await this.db.query(`DELETE FROM ${this.pkgTable()} WHERE id = ?`, [id]);
+    return { deleted: true };
+  }
+
+  // ---- grants ----
+
+  /** All grants (optionally filtered), newest expiry first, paginated. */
+  async listGrants(page?: number, limit?: number, search = ''): Promise<Paginated<VipGrantRow>> {
+    const np = normalizePage(page, limit);
+    const where: string[] = [];
+    const params: any[] = [];
+    if (search?.trim()) { where.push(`(steam_id LIKE ? OR group_id LIKE ?)`); params.push(`%${search.trim()}%`, `%${search.trim()}%`); }
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+
+    const cnt = await this.db.first<{ c: number }>(
+      `SELECT COUNT(*) AS c FROM ${this.grantTable()} ${whereSql}`, params,
+    );
+    const total = cnt ? Number(cnt.c) : 0;
+    const items = await this.db.query<VipGrantRow>(
+      `SELECT id, steam_id, group_id, expires_at, active, updated_at
+       FROM ${this.grantTable()} ${whereSql}
+       ORDER BY active DESC, expires_at DESC LIMIT ? OFFSET ?`,
+      [...params, np.limit, np.offset],
+    );
+    return { items, total, page: np.page, limit: np.limit, pages: Math.ceil(total / np.limit) };
+  }
+
+  async grantsForUser(steamId: string): Promise<VipGrantRow[]> {
+    return this.db.query<VipGrantRow>(
+      `SELECT id, steam_id, group_id, expires_at, active, updated_at
+       FROM ${this.grantTable()} WHERE steam_id = ? ORDER BY expires_at DESC`,
+      [steamId],
+    );
+  }
+
+  /** Extend (or create) a grant by N days. New expiry = later of (now / current expiry) + days. */
+  async extend(steamId: string, groupId: string, days: number, actor: string): Promise<VipGrantRow> {
+    if (!groupId?.trim()) throw new BadRequestException('group_id required');
+    if (!Number.isInteger(days) || days <= 0) throw new BadRequestException('days must be a positive integer');
+    await this.db.query(
+      `INSERT INTO ${this.grantTable()} (steam_id, group_id, expires_at, active)
+       VALUES (?, ?, DATE_ADD(UTC_TIMESTAMP(), INTERVAL ? DAY), 1)
+       ON DUPLICATE KEY UPDATE
+         expires_at = DATE_ADD(GREATEST(UTC_TIMESTAMP(),
+           CASE WHEN active = 1 THEN expires_at ELSE UTC_TIMESTAMP() END), INTERVAL ? DAY),
+         active = 1`,
+      [steamId, groupId, days, days],
+    );
+    await this.log(steamId, groupId, 'grant', days, actor);
+    return this.oneGrant(steamId, groupId);
+  }
+
+  /** Set an absolute expiry (UTC). active becomes 1 if it's in the future, else 0. */
+  async setExpiry(steamId: string, groupId: string, expiresAtUtc: string, actor: string): Promise<VipGrantRow> {
+    if (!groupId?.trim()) throw new BadRequestException('group_id required');
+    const d = new Date(expiresAtUtc);
+    if (isNaN(d.getTime())) throw new BadRequestException('expires_at must be a valid date');
+    const active = d.getTime() > Date.now() ? 1 : 0;
+    const mysqlDt = d.toISOString().slice(0, 19).replace('T', ' '); // UTC 'YYYY-MM-DD HH:MM:SS'
+    await this.db.query(
+      `INSERT INTO ${this.grantTable()} (steam_id, group_id, expires_at, active)
+       VALUES (?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE expires_at = VALUES(expires_at), active = VALUES(active)`,
+      [steamId, groupId, mysqlDt, active],
+    );
+    await this.log(steamId, groupId, 'set', 0, actor);
+    return this.oneGrant(steamId, groupId);
+  }
+
+  /** Revoke now: active=0, expires_at=now. The plugin removes the group on its next sweep. */
+  async revoke(steamId: string, groupId: string, actor: string): Promise<{ revoked: boolean }> {
+    await this.db.query(
+      `UPDATE ${this.grantTable()} SET active = 0, expires_at = UTC_TIMESTAMP()
+       WHERE steam_id = ? AND group_id = ?`,
+      [steamId, groupId],
+    );
+    await this.log(steamId, groupId, 'revoke', 0, actor);
+    return { revoked: true };
+  }
+
+  private async oneGrant(steamId: string, groupId: string): Promise<VipGrantRow> {
+    const row = await this.db.first<VipGrantRow>(
+      `SELECT id, steam_id, group_id, expires_at, active, updated_at
+       FROM ${this.grantTable()} WHERE steam_id = ? AND group_id = ? LIMIT 1`,
+      [steamId, groupId],
+    );
+    if (!row) throw new NotFoundException('Grant not found');
+    return row;
+  }
+
+  private async log(steamId: string, groupId: string, action: string, days: number, actor: string) {
+    await this.db.query(
+      `INSERT INTO ${this.logTable()} (steam_id, group_id, action, days, actor) VALUES (?, ?, ?, ?, ?)`,
+      [steamId, groupId, action, days, (actor || 'admin').slice(0, 64)],
+    );
+  }
+
+  private validatePackage(input: VipPackageInput) {
+    if (!input.tier?.trim()) throw new BadRequestException('tier required');
+    if (!input.group_id?.trim()) throw new BadRequestException('group_id required');
+    if (!Number.isInteger(input.days) || input.days <= 0) throw new BadRequestException('days must be a positive integer');
+    if (!Number.isFinite(input.price_coins) || input.price_coins < 0) throw new BadRequestException('price_coins must be >= 0');
+  }
+}
