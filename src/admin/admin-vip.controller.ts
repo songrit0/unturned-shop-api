@@ -72,8 +72,13 @@ export class AdminVipController {
 
   // ---- grants ----
   @Get('grants')
-  listGrants(@Query('page') page?: string, @Query('limit') limit?: string, @Query('q') q?: string) {
-    return this.svc.listGrants(parseInt(page!, 10), parseInt(limit!, 10), q || '');
+  listGrants(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('q') q?: string,
+    @Query('active') active?: string,
+  ) {
+    return this.svc.listGrants(parseInt(page!, 10), parseInt(limit!, 10), q || '', active === '1' || active === 'true');
   }
 
   @Get('grants/:steamId')

@@ -20,6 +20,8 @@ export interface VipGrantRow {
   expires_at: Date;
   active: number;
   updated_at: Date;
+  discord_id?: string | null;
+  discord_username?: string | null;
 }
 
 export interface VipPackageInput {
@@ -104,22 +106,33 @@ export class AdminVipService {
 
   // ---- grants ----
 
-  /** All grants (optionally filtered), newest expiry first, paginated. */
-  async listGrants(page?: number, limit?: number, search = ''): Promise<Paginated<VipGrantRow>> {
+  /** All grants (optionally filtered), active first then newest expiry, paginated. Joins the
+   * Discord link so the admin sees who each steam id is. activeOnly hides expired/revoked rows. */
+  async listGrants(page?: number, limit?: number, search = '', activeOnly = false): Promise<Paginated<VipGrantRow>> {
     const np = normalizePage(page, limit);
+    const links = this.db.table('sv', 'links');
     const where: string[] = [];
     const params: any[] = [];
-    if (search?.trim()) { where.push(`(steam_id LIKE ? OR group_id LIKE ?)`); params.push(`%${search.trim()}%`, `%${search.trim()}%`); }
+    if (activeOnly) where.push(`g.active = 1 AND g.expires_at > UTC_TIMESTAMP()`);
+    if (search?.trim()) {
+      where.push(`(g.steam_id LIKE ? OR g.group_id LIKE ? OR l.discord_id LIKE ? OR l.discord_username LIKE ?)`);
+      const s = `%${search.trim()}%`;
+      params.push(s, s, s, s);
+    }
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
     const cnt = await this.db.first<{ c: number }>(
-      `SELECT COUNT(*) AS c FROM ${this.grantTable()} ${whereSql}`, params,
+      `SELECT COUNT(*) AS c FROM ${this.grantTable()} g LEFT JOIN ${links} l ON l.steam_id = g.steam_id ${whereSql}`,
+      params,
     );
     const total = cnt ? Number(cnt.c) : 0;
     const items = await this.db.query<VipGrantRow>(
-      `SELECT id, steam_id, group_id, expires_at, active, updated_at
-       FROM ${this.grantTable()} ${whereSql}
-       ORDER BY active DESC, expires_at DESC LIMIT ? OFFSET ?`,
+      `SELECT g.id, g.steam_id, g.group_id, g.expires_at, g.active, g.updated_at,
+              l.discord_id, l.discord_username
+       FROM ${this.grantTable()} g
+       LEFT JOIN ${links} l ON l.steam_id = g.steam_id
+       ${whereSql}
+       ORDER BY g.active DESC, g.expires_at DESC LIMIT ? OFFSET ?`,
       [...params, np.limit, np.offset],
     );
     return { items, total, page: np.page, limit: np.limit, pages: Math.ceil(total / np.limit) };
