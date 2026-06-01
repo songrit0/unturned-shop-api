@@ -1,5 +1,5 @@
 import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Put, Query, UseGuards } from '@nestjs/common';
-import { ArrayMaxSize, IsArray, IsBoolean, IsInt, IsNumber, IsOptional, Max, Min, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsBoolean, IsInt, IsNumber, IsOptional, IsString, Max, MaxLength, Min, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { AdminGuard } from '../common/guards/admin.guard';
@@ -13,6 +13,10 @@ class UpsertMarketDto {
   @IsNumber() @Min(0) @Max(2) elasticity!: number;
   @IsInt() @Min(0) amount!: number;
   @IsOptional() @IsBoolean() enabled?: boolean;
+  // Allow creating a buy-only entry when the item isn't in the master catalog.
+  @IsOptional() @IsBoolean() create_if_missing?: boolean;
+  @IsOptional() @IsString() @MaxLength(128) name?: string;
+  @IsOptional() @IsString() @MaxLength(512) image_url?: string;
 }
 
 class ImportMarketDto {
@@ -54,6 +58,9 @@ export class AdminMarketController {
       base_price: body.base_price, target_stock: body.target_stock, elasticity: body.elasticity,
       amount: body.amount,
       enabled: body.enabled !== false,
+      createIfMissing: body.create_if_missing === true,
+      name: body.name,
+      imageUrl: body.image_url ?? null,
     });
   }
 

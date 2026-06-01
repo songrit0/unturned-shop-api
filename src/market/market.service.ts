@@ -28,6 +28,7 @@ export interface SellPriceItem {
   base_price: number;      // anchor
   sell_price: number;      // what a player receives = buy_price × (1 - commission)
   trend: number;           // -1 below anchor, 0 at anchor, 1 above anchor
+  enabled: boolean;        // false = shop buys it but does NOT sell it (buy-only)
 }
 
 export interface SellPriceBoard {
@@ -106,7 +107,9 @@ export class MarketService {
     const commission = this.cfg.get<{ sellCommissionPercent: number }>('shop')?.sellCommissionPercent ?? 40;
     const rate = Math.max(0, 1 - commission / 100);
 
-    const where: string[] = ['m.enabled=1'];
+    // NOTE: no `m.enabled=1` filter — this is the BUY-side board. The shop buys
+    // items from players even when they are disabled for selling (buy-only).
+    const where: string[] = [];
     const params: any[] = [];
     if (ids.length > 0) {
       where.push(`m.item_id NOT IN (${ids.map(() => '?').join(',')})`);
@@ -116,14 +119,15 @@ export class MarketService {
       where.push('i.type_id = ?');
       params.push(typeId);
     }
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
     const rows = await this.db.query<any>(
       `SELECT m.item_id, i.name, i.image_url, i.type_id, t.name AS type_name,
-              m.price AS buy_price, m.base_price
+              m.price AS buy_price, m.base_price, m.enabled
        FROM ${market} m
        LEFT JOIN ${items} i ON i.id = m.item_id
        LEFT JOIN ${itemTypes} t ON t.id = i.type_id
-       WHERE ${where.join(' AND ')}
+       ${whereSql}
        ORDER BY i.name ASC`,
       params,
     );
@@ -141,6 +145,7 @@ export class MarketService {
         base_price: base,
         sell_price: Math.floor(buy * rate),
         trend: buy > base ? 1 : (buy < base ? -1 : 0),
+        enabled: !!r.enabled,
       };
     });
     return { commission_percent: commission, items: board };

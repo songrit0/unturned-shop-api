@@ -23,6 +23,10 @@ export interface UpsertInput {
   target_stock: number;
   elasticity: number;
   enabled: boolean;
+  /** When the item isn't in the master catalog, create a minimal stub instead of failing (buy-only setup). */
+  createIfMissing?: boolean;
+  name?: string;             // name for the auto-created catalog stub
+  imageUrl?: string | null;  // image for the auto-created catalog stub
 }
 
 export interface MarketExportRow {
@@ -119,12 +123,21 @@ export class AdminMarketService {
   async upsert(i: UpsertInput): Promise<AdminMarketItem> {
     const market = this.db.table('sv', 'market');
     const items = this.db.table('sv', 'items');
-    // item_id MUST exist in master catalog — don't auto-create
+    // item_id must exist in the master catalog. With createIfMissing we insert a
+    // minimal stub first (so the shop can BUY an item that isn't in Master Items),
+    // otherwise we fail — keeping bulk Import strict about unknown ids.
     const exists = await this.db.first<{ c: number }>(
       `SELECT COUNT(*) AS c FROM ${items} WHERE id = ?`, [i.item_id],
     );
     if (!exists || Number(exists.c) === 0) {
-      throw new BadRequestException('Item not found in catalog');
+      if (!i.createIfMissing) {
+        throw new BadRequestException('Item not found in catalog');
+      }
+      const stubName = (i.name && i.name.trim()) ? i.name.trim() : `Item #${i.item_id}`;
+      await this.db.query(
+        `INSERT INTO ${items} (id, name, image_url) VALUES (?, ?, ?)`,
+        [i.item_id, stubName, i.imageUrl ?? null],
+      );
     }
 
     // Pull name/image_url from sv_items in the same statement so the INSERT still
