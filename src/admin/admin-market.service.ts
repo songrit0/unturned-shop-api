@@ -13,7 +13,8 @@ export interface AdminMarketItem {
   image_url: string | null;
   type_id: number | null;
   type_name: string | null;
-  enabled: number;
+  enabled: number;             // 1 = shop BUYS it (sell-to-shop board)
+  enabled_isforsell: number;   // 1 = shop SELLS it (Shop page)
 }
 
 export interface UpsertInput {
@@ -22,11 +23,8 @@ export interface UpsertInput {
   base_price: number;
   target_stock: number;
   elasticity: number;
-  enabled: boolean;
-  /** When the item isn't in the master catalog, create a minimal stub instead of failing (buy-only setup). */
-  createIfMissing?: boolean;
-  name?: string;             // name for the auto-created catalog stub
-  imageUrl?: string | null;  // image for the auto-created catalog stub
+  enabled: boolean;            // shop buys it
+  enabledIsForSell: boolean;   // shop sells it
 }
 
 export interface MarketExportRow {
@@ -36,6 +34,7 @@ export interface MarketExportRow {
   elasticity: number;
   amount: number;
   enabled: boolean;
+  enabled_isforsell: boolean;
 }
 
 export interface ImportResult {
@@ -56,7 +55,7 @@ export class AdminMarketService {
     const sql =
       `SELECT m.item_id, i.name, i.description, m.price, m.amount,
               m.base_price, m.target_stock, m.elasticity,
-              i.image_url, i.type_id, t.name AS type_name, m.enabled
+              i.image_url, i.type_id, t.name AS type_name, m.enabled, m.enabled_isforsell
        FROM ${market} m
        LEFT JOIN ${items} i ON i.id = m.item_id
        LEFT JOIN ${types} t ON t.id = i.type_id
@@ -80,7 +79,7 @@ export class AdminMarketService {
   async exportAll(): Promise<MarketExportRow[]> {
     const market = this.db.table('sv', 'market');
     const rows = await this.db.query<any>(
-      `SELECT item_id, base_price, target_stock, elasticity, amount, enabled
+      `SELECT item_id, base_price, target_stock, elasticity, amount, enabled, enabled_isforsell
        FROM ${market} ORDER BY item_id ASC`,
     );
     return rows.map(r => ({
@@ -90,6 +89,7 @@ export class AdminMarketService {
       elasticity: Number(r.elasticity),
       amount: Number(r.amount),
       enabled: !!r.enabled,
+      enabled_isforsell: !!r.enabled_isforsell,
     }));
   }
 
@@ -123,21 +123,12 @@ export class AdminMarketService {
   async upsert(i: UpsertInput): Promise<AdminMarketItem> {
     const market = this.db.table('sv', 'market');
     const items = this.db.table('sv', 'items');
-    // item_id must exist in the master catalog. With createIfMissing we insert a
-    // minimal stub first (so the shop can BUY an item that isn't in Master Items),
-    // otherwise we fail — keeping bulk Import strict about unknown ids.
+    // item_id MUST exist in the master catalog — we never auto-create stubs here.
     const exists = await this.db.first<{ c: number }>(
       `SELECT COUNT(*) AS c FROM ${items} WHERE id = ?`, [i.item_id],
     );
     if (!exists || Number(exists.c) === 0) {
-      if (!i.createIfMissing) {
-        throw new BadRequestException('Item not found in catalog');
-      }
-      const stubName = (i.name && i.name.trim()) ? i.name.trim() : `Item #${i.item_id}`;
-      await this.db.query(
-        `INSERT INTO ${items} (id, name, image_url) VALUES (?, ?, ?)`,
-        [i.item_id, stubName, i.imageUrl ?? null],
-      );
+      throw new BadRequestException('Item not found in catalog');
     }
 
     // Pull name/image_url from sv_items in the same statement so the INSERT still
@@ -145,25 +136,25 @@ export class AdminMarketService {
     // when SHOP_API_DROP_LEGACY_MARKET_COLS is unset. After those columns are dropped,
     // remove `name`, `image_url` from the column list and the SELECT projection.
     await this.db.query(
-      `INSERT INTO ${market} (item_id, name, image_url, price, amount, base_price, target_stock, elasticity, enabled)
-       SELECT ?, i.name, i.image_url, ?, ?, ?, ?, ?, ?
+      `INSERT INTO ${market} (item_id, name, image_url, price, amount, base_price, target_stock, elasticity, enabled, enabled_isforsell)
+       SELECT ?, i.name, i.image_url, ?, ?, ?, ?, ?, ?, ?
        FROM ${items} i WHERE i.id = ?
        ON DUPLICATE KEY UPDATE
          amount = VALUES(amount),
          base_price = VALUES(base_price), target_stock = VALUES(target_stock), elasticity = VALUES(elasticity),
-         enabled = VALUES(enabled)`,
-      [i.item_id, i.base_price, i.amount, i.base_price, i.target_stock, i.elasticity, i.enabled ? 1 : 0, i.item_id],
+         enabled = VALUES(enabled), enabled_isforsell = VALUES(enabled_isforsell)`,
+      [i.item_id, i.base_price, i.amount, i.base_price, i.target_stock, i.elasticity,
+       i.enabled ? 1 : 0, i.enabledIsForSell ? 1 : 0, i.item_id],
     );
     await this.pricing.recomputeFor([i.item_id]);
     return this.getOne(i.item_id);
   }
 
   /**
-   * Set one or more catalog items to "buy-only" (shop purchases but doesn't sell):
-   *   - already in the market  -> just flip enabled=0, KEEPING the existing price
-   *   - not in the market yet   -> create a disabled row with default pricing
-   *     (admin tunes base_price later in Manage Market)
-   * Same sv_market table as normal items — buy-only is only the enabled flag.
+   * Set one or more catalog items to "buy-only": the shop BUYS them (enabled=1)
+   * but does NOT sell them (enabled_isforsell=0).
+   *   - already in the market -> flip the two flags, KEEPING the existing price
+   *   - not in the market yet  -> create a row with default pricing (admin tunes later)
    */
   async enableBuyOnly(itemIds: number[]): Promise<{ ok: true; created: number; updated: number; failed: { item_id: number; error: string }[] }> {
     const market = this.db.table('sv', 'market');
@@ -177,11 +168,13 @@ export class AdminMarketService {
           `SELECT COUNT(*) AS c FROM ${market} WHERE item_id = ?`, [id],
         );
         if (ex && Number(ex.c) > 0) {
-          await this.toggleEnabled(id, false); // preserve existing price
+          await this.db.query(
+            `UPDATE ${market} SET enabled = 1, enabled_isforsell = 0 WHERE item_id = ?`, [id],
+          );
           updated++;
         } else {
           // validates catalog membership; throws -> reported in failed
-          await this.upsert({ item_id: id, base_price: 100, target_stock: 10, elasticity: 0.5, amount: 0, enabled: false });
+          await this.upsert({ item_id: id, base_price: 100, target_stock: 10, elasticity: 0.5, amount: 0, enabled: true, enabledIsForSell: false });
           created++;
         }
       } catch (e: any) {
@@ -207,9 +200,17 @@ export class AdminMarketService {
     return { ok: true, deleted: affected };
   }
 
+  /** Toggle whether the shop BUYS the item (sell-to-shop board). */
   async toggleEnabled(item_id: number, enabled: boolean): Promise<AdminMarketItem> {
     const market = this.db.table('sv', 'market');
     await this.db.query(`UPDATE ${market} SET enabled = ? WHERE item_id = ?`, [enabled ? 1 : 0, item_id]);
+    return this.getOne(item_id);
+  }
+
+  /** Toggle whether the shop SELLS the item (Shop page). */
+  async toggleForSale(item_id: number, isForSale: boolean): Promise<AdminMarketItem> {
+    const market = this.db.table('sv', 'market');
+    await this.db.query(`UPDATE ${market} SET enabled_isforsell = ? WHERE item_id = ?`, [isForSale ? 1 : 0, item_id]);
     return this.getOne(item_id);
   }
 
