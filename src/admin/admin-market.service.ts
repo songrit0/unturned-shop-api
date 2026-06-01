@@ -25,6 +25,22 @@ export interface UpsertInput {
   enabled: boolean;
 }
 
+export interface MarketExportRow {
+  item_id: number;
+  base_price: number;
+  target_stock: number;
+  elasticity: number;
+  amount: number;
+  enabled: boolean;
+}
+
+export interface ImportResult {
+  total: number;
+  created: number;
+  updated: number;
+  failed: { item_id: number; error: string }[];
+}
+
 @Injectable()
 export class AdminMarketService {
   constructor(private readonly db: DbService, private readonly pricing: PricingService) {}
@@ -54,6 +70,50 @@ export class AdminMarketService {
     const { sql, params } = this.joinedSelect(`ORDER BY m.item_id ASC LIMIT ? OFFSET ?`, [np.limit, np.offset]);
     const items = await this.db.query<AdminMarketItem>(sql, params);
     return { items, total, page: np.page, limit: np.limit, pages: Math.ceil(total / np.limit) };
+  }
+
+  /** Every market row in import-ready shape (no pagination) for backup / bulk edit. */
+  async exportAll(): Promise<MarketExportRow[]> {
+    const market = this.db.table('sv', 'market');
+    const rows = await this.db.query<any>(
+      `SELECT item_id, base_price, target_stock, elasticity, amount, enabled
+       FROM ${market} ORDER BY item_id ASC`,
+    );
+    return rows.map(r => ({
+      item_id: Number(r.item_id),
+      base_price: Number(r.base_price),
+      target_stock: Number(r.target_stock),
+      elasticity: Number(r.elasticity),
+      amount: Number(r.amount),
+      enabled: !!r.enabled,
+    }));
+  }
+
+  /**
+   * Bulk upsert from an imported file. Each row is upserted independently so one
+   * bad row (e.g. an item_id missing from the catalog) doesn't abort the batch;
+   * it's reported in `failed` instead. created/updated is decided per row by a
+   * pre-check against sv_market.
+   */
+  async importMany(rows: UpsertInput[]): Promise<ImportResult> {
+    const market = this.db.table('sv', 'market');
+    let created = 0;
+    let updated = 0;
+    const failed: { item_id: number; error: string }[] = [];
+
+    for (const r of rows) {
+      try {
+        const ex = await this.db.first<{ c: number }>(
+          `SELECT COUNT(*) AS c FROM ${market} WHERE item_id = ?`, [r.item_id],
+        );
+        const isNew = !ex || Number(ex.c) === 0;
+        await this.upsert(r); // validates catalog membership + recomputes price
+        if (isNew) created++; else updated++;
+      } catch (e: any) {
+        failed.push({ item_id: r.item_id, error: e?.message ?? 'upsert failed' });
+      }
+    }
+    return { total: rows.length, created, updated, failed };
   }
 
   async upsert(i: UpsertInput): Promise<AdminMarketItem> {

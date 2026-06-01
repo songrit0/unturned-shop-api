@@ -1,5 +1,6 @@
 import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Put, Query, UseGuards } from '@nestjs/common';
-import { IsBoolean, IsInt, IsNumber, IsOptional, Max, Min } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsBoolean, IsInt, IsNumber, IsOptional, Max, Min, ValidateNested } from 'class-validator';
+import { Type } from 'class-transformer';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { AdminGuard } from '../common/guards/admin.guard';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
@@ -14,6 +15,14 @@ class UpsertMarketDto {
   @IsOptional() @IsBoolean() enabled?: boolean;
 }
 
+class ImportMarketDto {
+  @IsArray()
+  @ArrayMaxSize(2000)
+  @ValidateNested({ each: true })
+  @Type(() => UpsertMarketDto)
+  items!: UpsertMarketDto[];
+}
+
 class ToggleDto { @IsBoolean() enabled!: boolean; }
 
 @Controller('admin/market')
@@ -22,7 +31,21 @@ export class AdminMarketController {
   constructor(private readonly svc: AdminMarketService) {}
 
   @Get() list(@Query() q: PaginationQueryDto) { return this.svc.listAll(q.page, q.limit); }
+
+  // Must be declared BEFORE the ':id' route, otherwise 'export' is parsed as an id.
+  @Get('export') exportAll() { return this.svc.exportAll(); }
+
   @Get(':id') getOne(@Param('id', ParseIntPipe) id: number) { return this.svc.getOne(id); }
+
+  @Post('import')
+  importMany(@Body() body: ImportMarketDto) {
+    return this.svc.importMany(body.items.map(b => ({
+      item_id: b.item_id,
+      base_price: b.base_price, target_stock: b.target_stock, elasticity: b.elasticity,
+      amount: b.amount,
+      enabled: b.enabled !== false,
+    })));
+  }
 
   @Post()
   upsert(@Body() body: UpsertMarketDto) {
