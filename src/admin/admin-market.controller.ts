@@ -29,6 +29,14 @@ class ImportMarketDto {
 
 class ToggleDto { @IsBoolean() enabled!: boolean; }
 
+class BuyOnlyDto {
+  @IsArray()
+  @ArrayMaxSize(2000)
+  @IsInt({ each: true })
+  @Min(1, { each: true })
+  item_ids!: number[];
+}
+
 @Controller('admin/market')
 @UseGuards(JwtAuthGuard, AdminGuard)
 export class AdminMarketController {
@@ -67,6 +75,12 @@ export class AdminMarketController {
   @Put(':id/enabled')
   toggle(@Param('id', ParseIntPipe) id: number, @Body() body: ToggleDto) {
     return this.svc.toggleEnabled(id, body.enabled);
+  }
+
+  /** Set items to buy-only (enabled=0); creates a default row if not in the market yet. */
+  @Post('buy-only')
+  buyOnly(@Body() body: BuyOnlyDto) {
+    return this.svc.enableBuyOnly(body.item_ids);
   }
 
   @Delete(':id') remove(@Param('id', ParseIntPipe) id: number) { return this.svc.remove(id); }

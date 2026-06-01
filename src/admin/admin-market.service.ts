@@ -158,6 +158,39 @@ export class AdminMarketService {
     return this.getOne(i.item_id);
   }
 
+  /**
+   * Set one or more catalog items to "buy-only" (shop purchases but doesn't sell):
+   *   - already in the market  -> just flip enabled=0, KEEPING the existing price
+   *   - not in the market yet   -> create a disabled row with default pricing
+   *     (admin tunes base_price later in Manage Market)
+   * Same sv_market table as normal items — buy-only is only the enabled flag.
+   */
+  async enableBuyOnly(itemIds: number[]): Promise<{ ok: true; created: number; updated: number; failed: { item_id: number; error: string }[] }> {
+    const market = this.db.table('sv', 'market');
+    let created = 0;
+    let updated = 0;
+    const failed: { item_id: number; error: string }[] = [];
+
+    for (const id of itemIds) {
+      try {
+        const ex = await this.db.first<{ c: number }>(
+          `SELECT COUNT(*) AS c FROM ${market} WHERE item_id = ?`, [id],
+        );
+        if (ex && Number(ex.c) > 0) {
+          await this.toggleEnabled(id, false); // preserve existing price
+          updated++;
+        } else {
+          // validates catalog membership; throws -> reported in failed
+          await this.upsert({ item_id: id, base_price: 100, target_stock: 10, elasticity: 0.5, amount: 0, enabled: false });
+          created++;
+        }
+      } catch (e: any) {
+        failed.push({ item_id: id, error: e?.message ?? 'failed' });
+      }
+    }
+    return { ok: true, created, updated, failed };
+  }
+
   async getOne(item_id: number): Promise<AdminMarketItem> {
     const { sql, params } = this.joinedSelect(`WHERE m.item_id = ?`, [item_id]);
     const row = await this.db.first<AdminMarketItem>(sql, params);
