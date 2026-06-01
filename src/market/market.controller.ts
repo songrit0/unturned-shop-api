@@ -41,6 +41,17 @@ export class MarketController {
     return this.market.listTypes();
   }
 
+  /** GET /market/sell-prices?type_id=<id> — what a player receives for selling to the shop. Before :id. */
+  @Get('sell-prices')
+  sellPrices(@Query('type_id') typeId?: string) {
+    let tid: number | null = null;
+    if (typeId != null && typeId !== '' && typeId !== 'null') {
+      const parsed = parseInt(typeId, 10);
+      if (Number.isFinite(parsed) && parsed > 0) tid = parsed;
+    }
+    return this.market.sellPrices(tid);
+  }
+
   /** GET /market/transactions?page=&limit=&kind=buy|sell|all — global cross-item transaction log. Declared before :id. */
   @Get('transactions')
   globalTransactions(

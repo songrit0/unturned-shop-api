@@ -12,6 +12,8 @@ export interface AppConfig {
   firebase: { serviceAccountPath: string; apiUrlDoc: string };
   wealthTax: { percent: number; threshold: number; cron: string };
   p2p: { commissionPercent: number; ttlDays: number; expireCron: string; refundCodeTtlDays: number };
+  /** Commission taken when a player sells to the shop. Mirror SellVault's BaseCommissionPercent. */
+  shop: { sellCommissionPercent: number };
 }
 
 export default (): AppConfig => ({
@@ -60,5 +62,9 @@ export default (): AppConfig => ({
     expireCron: process.env.P2P_EXPIRE_CRON || '*/15 * * * *',
     // Lifetime of the refund redeem code minted when a listing is cancelled/expired/force-closed.
     refundCodeTtlDays: parseInt(process.env.P2P_REFUND_CODE_TTL_DAYS || '7', 10),
+  },
+  shop: {
+    // Default 40 mirrors SellVault.BaseCommissionPercent (player receives 60% of market price).
+    sellCommissionPercent: parseFloat(process.env.SELL_COMMISSION || '40'),
   },
 });
