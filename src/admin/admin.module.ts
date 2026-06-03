@@ -7,10 +7,12 @@ import { AdminVipController } from './admin-vip.controller';
 import { AdminVipService } from './admin-vip.service';
 import { AdminVehicleMarketController } from './admin-vehicle-market.controller';
 import { AdminVehicleMarketService } from './admin-vehicle-market.service';
+import { AdminCodesController } from './admin-codes.controller';
+import { AdminCodesService } from './admin-codes.service';
 
 @Module({
-  controllers: [AdminMarketController, AdminCoinsController, AdminVipController, AdminVehicleMarketController],
-  providers: [AdminMarketService, AdminCoinsService, AdminVipService, AdminVehicleMarketService],
+  controllers: [AdminMarketController, AdminCoinsController, AdminVipController, AdminVehicleMarketController, AdminCodesController],
+  providers: [AdminMarketService, AdminCoinsService, AdminVipService, AdminVehicleMarketService, AdminCodesService],
   exports: [AdminMarketService],
 })
 export class AdminModule {}
