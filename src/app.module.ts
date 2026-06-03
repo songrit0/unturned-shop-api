@@ -21,6 +21,7 @@ import { VehiclesModule } from './vehicles/vehicles.module';
 import { MarketHistoryModule } from './market-history/market-history.module';
 import { VaultsModule } from './vaults/vaults.module';
 import { P2pModule } from './p2p/p2p.module';
+import { P2pGarageModule } from './p2p-garage/p2p-garage.module';
 import { ItemsSubmissionsModule } from './items-submissions/items-submissions.module';
 import { PurchasesModule } from './purchases/purchases.module';
 import { NotificationsModule } from './notifications/notifications.module';
@@ -52,6 +53,7 @@ import { VersionController } from './health/version.controller';
     MarketHistoryModule,
     VaultsModule,
     P2pModule,
+    P2pGarageModule,
     ItemsSubmissionsModule,
     PurchasesModule,
     NotificationsModule,

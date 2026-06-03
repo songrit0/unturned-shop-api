@@ -1,7 +1,7 @@
 export interface AppConfig {
   port: number;
   frontendUrl: string;
-  db: { host: string; port: number; database: string; user: string; password: string; svPrefix: string; rcPrefix: string };
+  db: { host: string; port: number; database: string; user: string; password: string; svPrefix: string; rcPrefix: string; garageTable: string };
   billItemIds: number[];
   discord: { clientId: string; clientSecret: string; redirectUri: string };
   jwt: { secret: string; expiresIn: string };
@@ -27,6 +27,8 @@ export default (): AppConfig => ({
     password: process.env.DB_PASSWORD || '',
     svPrefix: process.env.SV_PREFIX || 'sv_',
     rcPrefix: process.env.RC_PREFIX || 'rc_',
+    // Unprefixed table the VirtualGarage Unturned plugin owns (shared DB). One row per stored vehicle.
+    garageTable: process.env.GARAGE_TABLE || 'virtual_garage',
   },
   discord: {
     clientId: process.env.DISCORD_CLIENT_ID || '',

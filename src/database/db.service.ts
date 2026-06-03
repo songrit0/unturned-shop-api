@@ -87,6 +87,63 @@ export class DbService implements OnModuleInit, OnModuleDestroy {
 
     // Vehicles catalog + fixed-price market + rc_code_items.kind discriminator (migration 010)
     await this.ensureVehicleTables();
+
+    // P2P VirtualGarage listings + virtual_garage.listed_for_sale column (migration 011)
+    await this.ensureP2PGarageTables();
+  }
+
+  /**
+   * P2P VirtualGarage (migration 011): players sell a stored garage vehicle by TRANSFERRING
+   * ownership (virtual_garage.steam_id seller -> buyer). While listed the vehicle is locked
+   * via virtual_garage.listed_for_sale=1 (the plugin reads it so the seller can't retrieve it).
+   * sv_p2p_garage_listings is api-owned; the listed_for_sale column lives on the plugin-owned
+   * (unprefixed) virtual_garage table, so it is added idempotently via information_schema.
+   */
+  private async ensureP2PGarageTables() {
+    const listings = this.table('sv', 'p2p_garage_listings');
+    const dbName = this.cfg.get('db.database');
+    const garageBare = this.cfg.get('db.garageTable') || 'virtual_garage';
+
+    try {
+      await this.query(
+        `CREATE TABLE IF NOT EXISTS ${listings} (
+          id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+          seller_steam CHAR(17) NOT NULL,
+          garage_id INT NOT NULL,
+          garage_name VARCHAR(64) NOT NULL,
+          legacy_id INT UNSIGNED NOT NULL DEFAULT 0,
+          price DOUBLE NOT NULL,
+          status VARCHAR(16) NOT NULL DEFAULT 'active',
+          buyer_steam CHAR(17) DEFAULT NULL,
+          created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          closed_at DATETIME DEFAULT NULL,
+          PRIMARY KEY (id),
+          INDEX idx_status_created (status, created_at),
+          INDEX idx_seller (seller_steam),
+          INDEX idx_garage (garage_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+      );
+    } catch (e: any) {
+      this.log.warn(`p2p_garage_listings ensure failed: ${e.message}`);
+    }
+
+    // virtual_garage.listed_for_sale — plugin-owned table; add idempotently (plugin may not be
+    // redeployed yet). Do NOT touch any other virtual_garage column.
+    try {
+      const exists = await this.first<{ c: number }>(
+        `SELECT COUNT(*) AS c FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
+        [dbName, garageBare, 'listed_for_sale'],
+      );
+      if (!exists || Number(exists.c) === 0) {
+        await this.query(
+          `ALTER TABLE \`${garageBare}\` ADD COLUMN \`listed_for_sale\` TINYINT(1) NOT NULL DEFAULT 0`,
+        );
+        this.log.log(`Migration: added ${garageBare}.listed_for_sale`);
+      }
+    } catch (e: any) {
+      this.log.warn(`Migration ${garageBare}.listed_for_sale failed: ${e.message}`);
+    }
   }
 
   /**
@@ -684,6 +741,16 @@ export class DbService implements OnModuleInit, OnModuleDestroy {
 
   /** Quoted reference to a table without any prefix (e.g. MySQLVault's `Vaults`, `VaultsLocks`). */
   tableRaw(name: string): string {
+    return `\`${name}\``;
+  }
+
+  /**
+   * Quoted reference to the unprefixed, plugin-owned VirtualGarage table (db.garageTable).
+   * Backtick-quoted and stripped of backticks so the configured name can't break out of the
+   * identifier quoting (mirrors the prefix-table sanitization other refs rely on).
+   */
+  garageTableRaw(): string {
+    const name = String(this.cfg.get('db.garageTable') || 'virtual_garage').replace(/`/g, '');
     return `\`${name}\``;
   }
 
