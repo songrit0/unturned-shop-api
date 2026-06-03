@@ -17,6 +17,7 @@ import { PricingModule } from './pricing/pricing.module';
 import { ItemTypesModule } from './item-types/item-types.module';
 import { QuestsModule } from './quests/quests.module';
 import { ItemsModule } from './items/items.module';
+import { VehiclesModule } from './vehicles/vehicles.module';
 import { MarketHistoryModule } from './market-history/market-history.module';
 import { VaultsModule } from './vaults/vaults.module';
 import { P2pModule } from './p2p/p2p.module';
@@ -47,6 +48,7 @@ import { VersionController } from './health/version.controller';
     ItemTypesModule,
     QuestsModule,
     ItemsModule,
+    VehiclesModule,
     MarketHistoryModule,
     VaultsModule,
     P2pModule,

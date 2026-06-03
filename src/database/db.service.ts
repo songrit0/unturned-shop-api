@@ -84,6 +84,104 @@ export class DbService implements OnModuleInit, OnModuleDestroy {
 
     // VIP system tables (shared with the VIP plugin + Discord shop)
     await this.ensureVipTables();
+
+    // Vehicles catalog + fixed-price market + rc_code_items.kind discriminator (migration 010)
+    await this.ensureVehicleTables();
+  }
+
+  /**
+   * Vehicles refactor (migration 010): vehicles are sold the SAME way as items
+   * but vehicle IDs and item IDs are SEPARATE Unturned id spaces, so rc_code_items
+   * gains a `kind` discriminator (0=item, 1=vehicle) the game plugin reads to know
+   * which id space a row belongs to. Vehicles use a FIXED price (no supply/demand).
+   */
+  private async ensureVehicleTables() {
+    const prefix = this.cfg.get('db.svPrefix') || 'sv_';
+    const rcPrefix = this.cfg.get('db.rcPrefix') || 'rc_';
+    const dbName = this.cfg.get('db.database');
+    const vehicles = `\`${prefix}vehicles\``;
+    const vehicleMarket = `\`${prefix}vehicle_market\``;
+    const itemTypes = `\`${prefix}item_types\``;
+    const vehiclesBare = `${prefix}vehicles`;
+    const vehicleMarketBare = `${prefix}vehicle_market`;
+    const itemTypesBare = `${prefix}item_types`;
+    const codeItemsBare = `${rcPrefix}code_items`;
+
+    // 1) sv_vehicles catalog
+    try {
+      await this.query(
+        `CREATE TABLE IF NOT EXISTS ${vehicles} (
+          id INT UNSIGNED PRIMARY KEY,
+          name VARCHAR(64) NOT NULL,
+          description VARCHAR(512) NULL,
+          image_url VARCHAR(512) NULL,
+          type_id INT NULL,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          INDEX idx_vehicles_type (type_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+      );
+    } catch (e: any) {
+      this.log.warn(`vehicles ensure failed: ${e.message}`);
+    }
+
+    // 2) sv_vehicle_market — fixed price, no supply/demand columns
+    try {
+      await this.query(
+        `CREATE TABLE IF NOT EXISTS ${vehicleMarket} (
+          vehicle_id INT UNSIGNED PRIMARY KEY,
+          price DOUBLE NOT NULL DEFAULT 0,
+          amount INT NOT NULL DEFAULT 0,
+          enabled TINYINT(1) NOT NULL DEFAULT 1,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+      );
+    } catch (e: any) {
+      this.log.warn(`vehicle_market ensure failed: ${e.message}`);
+    }
+
+    // 3) rc_code_items.kind — backward-compatible discriminator (0=item, 1=vehicle)
+    try {
+      const exists = await this.first<{ c: number }>(
+        `SELECT COUNT(*) AS c FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
+        [dbName, codeItemsBare, 'kind'],
+      );
+      if (!exists || Number(exists.c) === 0) {
+        await this.query(
+          `ALTER TABLE \`${codeItemsBare}\` ADD COLUMN \`kind\` TINYINT UNSIGNED NOT NULL DEFAULT 0`,
+        );
+        this.log.log(`Migration: added ${codeItemsBare}.kind`);
+      }
+    } catch (e: any) {
+      this.log.warn(`Migration ${codeItemsBare}.kind failed: ${e.message}`);
+    }
+
+    // 4) Foreign keys — guarded by information_schema with orphan-row checks
+    await this.ensureForeignKey({
+      table: vehiclesBare,
+      name: 'fk_vehicles_type',
+      ddl: `ADD CONSTRAINT \`fk_vehicles_type\` FOREIGN KEY (\`type_id\`) REFERENCES ${itemTypes}(\`id\`) ON DELETE SET NULL`,
+      orphanSql:
+        `SELECT v.\`id\` FROM ${vehicles} v
+         LEFT JOIN ${itemTypes} t ON t.\`id\` = v.\`type_id\`
+         WHERE v.\`type_id\` IS NOT NULL AND t.\`id\` IS NULL LIMIT 50`,
+      orphanLabel: `${vehiclesBare}.type_id has no matching ${itemTypesBare}.id`,
+      dbName,
+    });
+
+    await this.ensureForeignKey({
+      table: vehicleMarketBare,
+      name: 'fk_vmarket_vehicle',
+      ddl: `ADD CONSTRAINT \`fk_vmarket_vehicle\` FOREIGN KEY (\`vehicle_id\`) REFERENCES ${vehicles}(\`id\`) ON DELETE CASCADE`,
+      orphanSql:
+        `SELECT m.\`vehicle_id\` AS id FROM ${vehicleMarket} m
+         LEFT JOIN ${vehicles} v ON v.\`id\` = m.\`vehicle_id\`
+         WHERE v.\`id\` IS NULL LIMIT 50`,
+      orphanLabel: `${vehicleMarketBare}.vehicle_id has no matching ${vehiclesBare}.id`,
+      dbName,
+    });
   }
 
   private async ensureVipTables() {

@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { DbService } from '../database/db.service';
 import { Paginated, normalizePage } from '../common/pagination';
 
-export interface CodeItem { item_id: number; amount: number; name: string | null; image_url: string | null; }
+export interface CodeItem { item_id: number; kind: number; amount: number; name: string | null; image_url: string | null; }
 export interface CodeRow {
   code_id: number;
   code: string;
@@ -28,6 +28,7 @@ export class CodesService {
     const codes = this.db.table('rc', 'codes');
     const codeItems = this.db.table('rc', 'code_items');
     const itemsT = this.db.table('sv', 'items');
+    const vehiclesT = this.db.table('sv', 'vehicles');
 
     const cnt = await this.db.first<{ c: number }>(
       `SELECT COUNT(*) AS c FROM ${owners} o INNER JOIN ${codes} c ON c.id = o.code_id WHERE o.steam_id = ?`,
@@ -47,10 +48,15 @@ export class CodesService {
     if (rows.length === 0) return { items: [], total, page: np.page, limit: np.limit, pages: Math.ceil(total / np.limit) };
 
     const codeIds = rows.map(r => r.code_id);
+    // kind 0 = item (resolve from sv_items), kind 1 = vehicle (resolve from sv_vehicles).
+    // item_id and vehicle id are separate id spaces, so join both and pick by kind.
     const items = await this.db.query<any>(
-      `SELECT ci.code_id, ci.item_id, ci.amount, i.name, i.image_url
+      `SELECT ci.code_id, ci.item_id, ci.kind, ci.amount,
+              COALESCE(v.name, i.name) AS name,
+              COALESCE(v.image_url, i.image_url) AS image_url
        FROM ${codeItems} ci
-       LEFT JOIN ${itemsT} i ON i.id = ci.item_id
+       LEFT JOIN ${itemsT} i ON ci.kind = 0 AND i.id = ci.item_id
+       LEFT JOIN ${vehiclesT} v ON ci.kind = 1 AND v.id = ci.item_id
        WHERE ci.code_id IN (${codeIds.map(() => '?').join(',')})`,
       codeIds,
     );
@@ -58,7 +64,7 @@ export class CodesService {
     const byCode = new Map<number, CodeItem[]>();
     for (const it of items) {
       const arr = byCode.get(Number(it.code_id)) || [];
-      arr.push({ item_id: Number(it.item_id), amount: Number(it.amount), name: it.name, image_url: it.image_url });
+      arr.push({ item_id: Number(it.item_id), kind: Number(it.kind), amount: Number(it.amount), name: it.name, image_url: it.image_url });
       byCode.set(Number(it.code_id), arr);
     }
 

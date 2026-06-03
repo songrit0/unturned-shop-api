@@ -8,21 +8,23 @@ import {
   Post,
   UseGuards,
 } from '@nestjs/common';
-import { IsInt, IsOptional, Min } from 'class-validator';
+import { IsIn, IsInt, IsOptional, Min } from 'class-validator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtPayload } from '../auth/strategies/jwt.strategy';
 import { UsersService } from '../users/users.service';
-import { BasketService } from './basket.service';
+import { BasketService, BasketKind } from './basket.service';
 
 class BasketItemDto {
   @IsInt() item_id!: number;
   @IsOptional() @IsInt() @Min(1) qty?: number;
+  @IsOptional() @IsIn(['item', 'vehicle']) kind?: BasketKind;
 }
 
 class BasketSetDto {
   @IsInt() item_id!: number;
   @IsInt() @Min(0) qty!: number;
+  @IsOptional() @IsIn(['item', 'vehicle']) kind?: BasketKind;
 }
 
 @Controller('basket')
@@ -52,7 +54,7 @@ export class BasketController {
   @HttpCode(200)
   async add(@CurrentUser() user: JwtPayload, @Body() body: BasketItemDto) {
     const steam = await this.requireSteam(user);
-    this.basket.add(steam, body.item_id, body.qty || 1);
+    this.basket.add(steam, body.item_id, body.qty || 1, body.kind ?? 'item');
     return this.basket.view(steam);
   }
 
@@ -60,7 +62,7 @@ export class BasketController {
   @HttpCode(200)
   async setQty(@CurrentUser() user: JwtPayload, @Body() body: BasketSetDto) {
     const steam = await this.requireSteam(user);
-    this.basket.setQty(steam, body.item_id, body.qty);
+    this.basket.setQty(steam, body.item_id, body.qty, body.kind ?? 'item');
     return this.basket.view(steam);
   }
 
@@ -68,7 +70,7 @@ export class BasketController {
   @HttpCode(200)
   async remove(@CurrentUser() user: JwtPayload, @Body() body: BasketItemDto) {
     const steam = await this.requireSteam(user);
-    this.basket.remove(steam, body.item_id);
+    this.basket.remove(steam, body.item_id, body.kind ?? 'item');
     return this.basket.view(steam);
   }
 
