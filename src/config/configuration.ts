@@ -14,6 +14,21 @@ export interface AppConfig {
   p2p: { commissionPercent: number; ttlDays: number; expireCron: string; refundCodeTtlDays: number; cancelPenaltyPct: number };
   /** Commission taken when a player sells to the shop. Mirror SellVault's BaseCommissionPercent. */
   shop: { sellCommissionPercent: number };
+  /**
+   * Real-money top-up settings. The Vcoin wallet + top-up records live in a SEPARATE
+   * Pi5-local MariaDB (topupDb), never the external shop DB.
+   */
+  topup: {
+    vcoinPerBaht: number;
+    minBaht: number;
+    maxBaht: number;
+    pollCron: string;
+    /** Max pending rows polled per tick — keeps us well under PlernPay's 30 req/min. */
+    pollBatch: number;
+  };
+  topupDb: { host: string; port: number; user: string; password: string; database: string };
+  /** PlernPay PromptPay top-up gateway credentials (server-only secret). */
+  plernpay: { baseUrl: string; clientId: string; clientSecret: string };
 }
 
 export default (): AppConfig => ({
@@ -71,5 +86,25 @@ export default (): AppConfig => ({
   shop: {
     // Default 40 mirrors SellVault.BaseCommissionPercent (player receives 60% of market price).
     sellCommissionPercent: parseFloat(process.env.SELL_COMMISSION || '40'),
+  },
+  topup: {
+    vcoinPerBaht: parseFloat(process.env.VCOIN_PER_BAHT || '1'),
+    minBaht: parseInt(process.env.TOPUP_MIN_BAHT || '1', 10),
+    maxBaht: parseInt(process.env.TOPUP_MAX_BAHT || '10000', 10),
+    // Poller fires every 15s; batch-cap keeps us well under PlernPay's 30 req/min.
+    pollCron: process.env.TOPUP_POLL_CRON || '*/15 * * * * *',
+    pollBatch: parseInt(process.env.TOPUP_POLL_BATCH || '5', 10),
+  },
+  topupDb: {
+    host: process.env.TOPUP_DB_HOST || '127.0.0.1',
+    port: parseInt(process.env.TOPUP_DB_PORT || '3306', 10),
+    user: process.env.TOPUP_DB_USER || '',
+    password: process.env.TOPUP_DB_PASSWORD || '',
+    database: process.env.TOPUP_DB_NAME || 'unturned_topup',
+  },
+  plernpay: {
+    baseUrl: process.env.PLERNPAY_BASE_URL || 'https://api.plernpay.com',
+    clientId: process.env.PLERNPAY_CLIENT_ID || '',
+    clientSecret: process.env.PLERNPAY_CLIENT_SECRET || '',
   },
 });
