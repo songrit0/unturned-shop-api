@@ -151,7 +151,7 @@ export class TopupService {
   async findPollable(limit: number): Promise<TopupRow[]> {
     return this.topupDb.query<TopupRow>(
       `SELECT * FROM topups
-        WHERE status = 'pending' AND (expires_at IS NULL OR expires_at > NOW())
+        WHERE status = 'pending' AND (expires_at IS NULL OR expires_at > UTC_TIMESTAMP())
         ORDER BY id ASC
         LIMIT ?`,
       [limit],
@@ -162,7 +162,7 @@ export class TopupService {
   async findExpiredPending(limit: number): Promise<TopupRow[]> {
     return this.topupDb.query<TopupRow>(
       `SELECT * FROM topups
-        WHERE status = 'pending' AND expires_at IS NOT NULL AND expires_at <= NOW()
+        WHERE status = 'pending' AND expires_at IS NOT NULL AND expires_at <= UTC_TIMESTAMP()
         ORDER BY id ASC
         LIMIT ?`,
       [limit],
@@ -229,6 +229,9 @@ export class TopupService {
   }
 
   /** Convert an ISO-ish gateway timestamp to a MySQL DATETIME string, or null. */
+  // Stores the value in UTC (toISOString is always UTC). Anything comparing expires_at in SQL
+  // MUST use UTC_TIMESTAMP(), not NOW() — NOW() is the server's local time (Pi5 = Asia/Bangkok,
+  // UTC+7), which would make a UTC expires_at look ~7h in the past and expire the row instantly.
   private toMysqlDate(iso: string | null | undefined): string | null {
     if (!iso) return null;
     const d = new Date(iso);
