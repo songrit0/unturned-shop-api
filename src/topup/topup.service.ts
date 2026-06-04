@@ -151,7 +151,7 @@ export class TopupService {
   async findPollable(limit: number): Promise<TopupRow[]> {
     return this.topupDb.query<TopupRow>(
       `SELECT * FROM topups
-        WHERE status = 'pending' AND (expires_at IS NULL OR expires_at > UTC_TIMESTAMP())
+        WHERE status = 'pending' AND (expires_at IS NULL OR expires_at > NOW())
         ORDER BY id ASC
         LIMIT ?`,
       [limit],
@@ -162,7 +162,7 @@ export class TopupService {
   async findExpiredPending(limit: number): Promise<TopupRow[]> {
     return this.topupDb.query<TopupRow>(
       `SELECT * FROM topups
-        WHERE status = 'pending' AND expires_at IS NOT NULL AND expires_at <= UTC_TIMESTAMP()
+        WHERE status = 'pending' AND expires_at IS NOT NULL AND expires_at <= NOW()
         ORDER BY id ASC
         LIMIT ?`,
       [limit],
@@ -229,13 +229,18 @@ export class TopupService {
   }
 
   /** Convert an ISO-ish gateway timestamp to a MySQL DATETIME string, or null. */
-  // Stores the value in UTC (toISOString is always UTC). Anything comparing expires_at in SQL
-  // MUST use UTC_TIMESTAMP(), not NOW() — NOW() is the server's local time (Pi5 = Asia/Bangkok,
-  // UTC+7), which would make a UTC expires_at look ~7h in the past and expire the row instantly.
+  // Formats an instant as a MySQL DATETIME string in the SERVER'S LOCAL time zone, to match the
+  // rest of the topup tables (created_at/confirmed_at/credited_at use CURRENT_TIMESTAMP/NOW(),
+  // which are local) and mysql2's default `timezone:'local'` on read-back. Storing expires_at in
+  // the same zone is what lets the poller compare it with NOW() and lets the API serialise it to
+  // the correct UTC ISO for the web. Do NOT store this in UTC: NOW() is local, so a UTC value
+  // would look ~7h in the past on a UTC+7 host and expire the row instantly.
   private toMysqlDate(iso: string | null | undefined): string | null {
     if (!iso) return null;
     const d = new Date(iso);
     if (isNaN(d.getTime())) return null;
-    return d.toISOString().slice(0, 19).replace('T', ' ');
+    const p = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} `
+      + `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
   }
 }
