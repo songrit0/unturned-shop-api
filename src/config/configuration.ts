@@ -25,6 +25,8 @@ export interface AppConfig {
     pollCron: string;
     /** Max pending rows polled per tick — keeps us well under PlernPay's 30 req/min. */
     pollBatch: number;
+    /** Soft-launch gate: when true only admins can create a top-up. Flip TOPUP_ADMIN_ONLY=false to open to all. */
+    adminOnly: boolean;
   };
   topupDb: { host: string; port: number; user: string; password: string; database: string };
   /** PlernPay PromptPay top-up gateway credentials (server-only secret). */
@@ -94,6 +96,8 @@ export default (): AppConfig => ({
     // Poller fires every 15s; batch-cap keeps us well under PlernPay's 30 req/min.
     pollCron: process.env.TOPUP_POLL_CRON || '*/15 * * * * *',
     pollBatch: parseInt(process.env.TOPUP_POLL_BATCH || '5', 10),
+    // Default admin-only (soft launch). Set TOPUP_ADMIN_ONLY=false to open to all players.
+    adminOnly: process.env.TOPUP_ADMIN_ONLY !== 'false',
   },
   topupDb: {
     host: process.env.TOPUP_DB_HOST || '127.0.0.1',

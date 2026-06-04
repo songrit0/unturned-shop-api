@@ -51,3 +51,14 @@ export class VcoinsController {
     return this.topup.vcoinBalance(user);
   }
 }
+
+/** Public top-up config so the web can gate its UI (admin_only) and show the rate/limits. No auth. */
+@Controller('config/topup')
+export class TopupConfigController {
+  constructor(private readonly topup: TopupService) {}
+
+  @Get()
+  config() {
+    return this.topup.publicConfig();
+  }
+}

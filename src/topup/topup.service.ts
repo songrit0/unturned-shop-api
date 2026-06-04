@@ -45,6 +45,20 @@ export class TopupService {
     const v = Number(this.cfg.get<number>('topup.maxBaht') ?? 10000);
     return Number.isFinite(v) && v >= 1 ? Math.floor(v) : 10000;
   }
+  /** Soft-launch gate: top-up restricted to admins until TOPUP_ADMIN_ONLY=false. */
+  private adminOnly(): boolean {
+    return this.cfg.get<boolean>('topup.adminOnly') !== false;
+  }
+
+  /** Public (no-auth) top-up config for the web to gate its UI + show the rate/limits. */
+  publicConfig() {
+    return {
+      admin_only: this.adminOnly(),
+      vcoin_per_baht: this.vcoinPerBaht(),
+      min_baht: this.minBaht(),
+      max_baht: this.maxBaht(),
+    };
+  }
 
   /**
    * Resolve the canonical steam_id for the authenticated user.
@@ -69,6 +83,10 @@ export class TopupService {
 
   /** POST /topup/create */
   async create(user: JwtPayload, baht: number): Promise<TopupCreateView> {
+    // Soft launch: only admins may top up until TOPUP_ADMIN_ONLY is flipped to false.
+    if (this.adminOnly() && !user.is_admin) {
+      throw new ForbiddenException('topup_admin_only');
+    }
     // Validate an integer-ish baht amount within the configured bounds.
     if (!Number.isFinite(baht) || Math.floor(baht) !== baht) {
       throw new BadRequestException('baht must be an integer');

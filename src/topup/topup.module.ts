@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
-import { TopupController, VcoinsController } from './topup.controller';
+import { TopupController, VcoinsController, TopupConfigController } from './topup.controller';
 import { TopupService } from './topup.service';
 import { TopupDbService } from './topup-db.service';
 import { PlernpayService } from './plernpay.service';
@@ -13,7 +13,7 @@ import { TopupPollService } from './topup-poll.service';
  */
 @Module({
   imports: [ScheduleModule.forRoot()],
-  controllers: [TopupController, VcoinsController],
+  controllers: [TopupController, VcoinsController, TopupConfigController],
   providers: [TopupService, TopupDbService, PlernpayService, TopupPollService],
   exports: [TopupService],
 })
