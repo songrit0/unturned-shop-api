@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   Logger,
@@ -7,17 +8,26 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as mysql from 'mysql2/promise';
+import generatePayload from 'promptpay-qr';
 import { DbService } from '../database/db.service';
 import { Paginated, normalizePage } from '../common/pagination';
 import { JwtPayload } from '../auth/strategies/jwt.strategy';
 import { PlernpayService } from './plernpay.service';
+import { ThunderService } from './thunder.service';
 import { TopupDbService } from './topup-db.service';
+import { randomBytes } from 'crypto';
 import {
+  ProviderRow,
+  ThunderCreateView,
+  ThunderVerifyView,
   TopupCreateView,
+  TopupProvider,
   TopupRow,
   TopupStatusView,
   VcoinBalanceView,
 } from './topup.types';
+
+const ALLOWED_PROVIDERS: TopupProvider[] = ['plernpay', 'thunder'];
 
 @Injectable()
 export class TopupService {
@@ -26,6 +36,7 @@ export class TopupService {
   constructor(
     private readonly topupDb: TopupDbService,
     private readonly plernpay: PlernpayService,
+    private readonly thunder: ThunderService,
     private readonly cfg: ConfigService,
     /** External shop DB — used READ-ONLY here, only to resolve steam_id from sv_links. */
     private readonly shopDb: DbService,
@@ -50,14 +61,31 @@ export class TopupService {
     return this.cfg.get<boolean>('topup.adminOnly') !== false;
   }
 
-  /** Public (no-auth) top-up config for the web to gate its UI + show the rate/limits. */
-  publicConfig() {
+  /** Public (no-auth) top-up config for the web to gate its UI + show the rate/limits + providers. */
+  async publicConfig() {
+    const providers = await this.enabledProviders();
     return {
       admin_only: this.adminOnly(),
       vcoin_per_baht: this.vcoinPerBaht(),
       min_baht: this.minBaht(),
       max_baht: this.maxBaht(),
+      providers: providers.map((p) => ({ key: p.key, label: p.label })),
     };
+  }
+
+  /** Enabled providers ordered by sort (for the public config + create-time gate). */
+  async enabledProviders(): Promise<ProviderRow[]> {
+    return this.topupDb.query<ProviderRow>(
+      `SELECT \`key\`, label, enabled, sort FROM topup_providers WHERE enabled = 1 ORDER BY sort ASC, \`key\` ASC`,
+    );
+  }
+
+  /** True when the named provider exists AND is enabled in the registry. */
+  private async isProviderEnabled(key: string): Promise<boolean> {
+    const row = await this.topupDb.first<{ enabled: number }>(
+      `SELECT enabled FROM topup_providers WHERE \`key\` = ?`, [key],
+    );
+    return !!row && Number(row.enabled) === 1;
   }
 
   /**
@@ -81,11 +109,18 @@ export class TopupService {
     throw new BadRequestException('link_steam_first');
   }
 
-  /** POST /topup/create */
-  async create(user: JwtPayload, baht: number): Promise<TopupCreateView> {
+  /** POST /topup/create — branches on provider (default 'plernpay'). */
+  async create(
+    user: JwtPayload,
+    baht: number,
+    provider: TopupProvider = 'plernpay',
+  ): Promise<TopupCreateView | ThunderCreateView> {
     // Soft launch: only admins may top up until TOPUP_ADMIN_ONLY is flipped to false.
     if (this.adminOnly() && !user.is_admin) {
       throw new ForbiddenException('topup_admin_only');
+    }
+    if (!ALLOWED_PROVIDERS.includes(provider)) {
+      throw new BadRequestException('unknown_provider');
     }
     // Validate an integer-ish baht amount within the configured bounds.
     if (!Number.isFinite(baht) || Math.floor(baht) !== baht) {
@@ -96,18 +131,34 @@ export class TopupService {
     if (baht < min || baht > max) {
       throw new BadRequestException(`baht must be between ${min} and ${max}`);
     }
+    // Provider must be enabled in the registry (admin on/off switch).
+    if (!(await this.isProviderEnabled(provider))) {
+      throw new BadRequestException('provider_disabled');
+    }
 
     const { steamId, discordId } = await this.resolveIdentity(user);
     const vcoins = Math.round(baht * this.vcoinPerBaht());
 
+    return provider === 'thunder'
+      ? this.createThunder(steamId, discordId, baht, vcoins)
+      : this.createPlernpay(steamId, discordId, baht, vcoins);
+  }
+
+  /** PlernPay auto-PromptPay gateway charge (unchanged flow; poller confirms). */
+  private async createPlernpay(
+    steamId: string,
+    discordId: string | null,
+    baht: number,
+    vcoins: number,
+  ): Promise<TopupCreateView> {
     // Create the gateway charge first; memo carries lightweight reconciliation info.
     const created = await this.plernpay.createTopup(baht, `topup steam:${steamId}`);
 
     // Persist the pending top-up in the Pi5-local DB ONLY.
     await this.topupDb.query(
       `INSERT INTO topups
-         (ref, steam_id, discord_id, baht, unique_amount, vcoins, qr_code, promptpay_id, status, expires_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+         (ref, steam_id, discord_id, baht, unique_amount, vcoins, qr_code, promptpay_id, status, provider, expires_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', 'plernpay', ?)`,
       [
         created.ref, steamId, discordId, baht, created.unique_amount, vcoins,
         created.qr_code, created.promptpay_id, this.toMysqlDate(created.expires_at),
@@ -116,6 +167,7 @@ export class TopupService {
 
     return {
       ref: created.ref,
+      provider: 'plernpay',
       unique_amount: Number(created.unique_amount),
       qr_code: created.qr_code,
       promptpay_id: created.promptpay_id,
@@ -123,6 +175,128 @@ export class TopupService {
       vcoins,
       status: 'pending',
     };
+  }
+
+  /**
+   * Thunder manual-PromptPay path: no gateway charge. We mint our own ref, generate a static
+   * PromptPay payload for the configured receiver + amount, and store a pending row. The buyer
+   * pays then uploads their slip to POST /topup/thunder/verify, which credits synchronously.
+   */
+  private async createThunder(
+    steamId: string,
+    discordId: string | null,
+    baht: number,
+    vcoins: number,
+  ): Promise<ThunderCreateView> {
+    const promptpayId = this.cfg.get<string>('thunder.promptpayId') || '';
+    if (!promptpayId) throw new BadRequestException('thunder_not_configured');
+    const receiverName = this.cfg.get<string>('thunder.receiverName') || '';
+
+    const ref = `th_${randomBytes(12).toString('hex')}`;
+    // EMVCo PromptPay payload string; the web renders the QR from it.
+    const payload = generatePayload(promptpayId, { amount: baht });
+
+    await this.topupDb.query(
+      `INSERT INTO topups
+         (ref, steam_id, discord_id, baht, unique_amount, vcoins, qr_code, promptpay_id, status, provider)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', 'thunder')`,
+      [ref, steamId, discordId, baht, baht, vcoins, payload, promptpayId],
+    );
+
+    return {
+      ref,
+      provider: 'thunder',
+      qr_code: payload,
+      promptpay_id: promptpayId,
+      receiver_name: receiverName || null,
+      amount: baht,
+      vcoins,
+      expires_at: null,
+      status: 'pending',
+    };
+  }
+
+  /**
+   * POST /topup/thunder/verify — owner uploads a bank slip; verify + credit synchronously.
+   * On any validation failure we throw 400 with a reason code and credit NOTHING.
+   */
+  async thunderVerify(user: JwtPayload, ref: string, slipBase64: string): Promise<ThunderVerifyView> {
+    const { steamId } = await this.resolveIdentity(user);
+    if (!slipBase64 || typeof slipBase64 !== 'string') {
+      throw new BadRequestException('slip_base64_required');
+    }
+
+    const row = await this.topupDb.first<TopupRow>(`SELECT * FROM topups WHERE ref = ?`, [ref]);
+    if (!row || row.provider !== 'thunder') throw new NotFoundException('topup_not_found');
+    if (String(row.steam_id) !== steamId) throw new NotFoundException('topup_not_found');
+    if (row.status !== 'pending') throw new ConflictException('topup_not_pending');
+
+    // Verify the slip against our account, requiring the slip amount to match the row's baht.
+    const result = await this.thunder.verifyBase64(slipBase64, Number(row.baht), `topup ${ref}`);
+
+    // Validation — fail closed, never credit on a bad slip.
+    if (result?.success !== true) throw new BadRequestException('slip_not_matched');
+    const d = result.data;
+    if (!d) throw new BadRequestException('slip_not_matched');
+    if (d.isDuplicate === true) throw new BadRequestException('duplicate_slip');
+    if (d.matchedAccount !== true) throw new BadRequestException('slip_not_matched');
+    if (d.isAmountMatched === false) throw new BadRequestException('amount_mismatch');
+    const transRef = d.rawSlip?.transRef;
+    if (!transRef) throw new BadRequestException('slip_no_trans_ref');
+
+    // Credit using the amount actually seen in the slip (defends against a tampered row.baht).
+    const amountInSlip = Number(d.amountInSlip);
+    if (!Number.isFinite(amountInSlip) || amountInSlip <= 0) {
+      throw new BadRequestException('amount_mismatch');
+    }
+    const creditVcoins = Math.round(amountInSlip * this.vcoinPerBaht());
+
+    const conn = await this.topupDb.getConnection();
+    try {
+      await conn.beginTransaction();
+
+      // Stamp the transRef first. The UNIQUE index rejects a slip already used by ANY row.
+      try {
+        const [upd] = await conn.query<mysql.ResultSetHeader>(
+          `UPDATE topups
+              SET trans_ref = ?, status='credited', credited_at=NOW(), confirmed_at=NOW(), vcoins = ?
+            WHERE ref = ? AND status='pending'`,
+          [transRef, creditVcoins, ref],
+        );
+        if (upd.affectedRows !== 1) {
+          await conn.rollback();
+          throw new ConflictException('topup_not_pending');
+        }
+      } catch (e: any) {
+        await conn.rollback();
+        if (e?.code === 'ER_DUP_ENTRY') throw new ConflictException('slip_already_used');
+        throw e;
+      }
+
+      await conn.query(
+        `INSERT INTO v_coins (steam_id, balance) VALUES (?, ?)
+         ON DUPLICATE KEY UPDATE balance = balance + VALUES(balance)`,
+        [steamId, creditVcoins],
+      );
+      await conn.query(
+        `INSERT INTO v_coin_log (steam_id, delta, reason, ref) VALUES (?, ?, 'topup_thunder', ?)`,
+        [steamId, creditVcoins, transRef],
+      );
+
+      const [balRows] = await conn.query<mysql.RowDataPacket[]>(
+        `SELECT balance FROM v_coins WHERE steam_id = ?`, [steamId],
+      );
+      await conn.commit();
+
+      const balance = balRows[0] ? Number((balRows[0] as any).balance) : creditVcoins;
+      this.log.log(`Thunder credited: ref=${ref} steam=${steamId} transRef=${transRef} +${creditVcoins} vcoins`);
+      return { ref, status: 'credited', vcoins: creditVcoins, balance };
+    } catch (e) {
+      try { await conn.rollback(); } catch { /* ignore */ }
+      throw e;
+    } finally {
+      conn.release();
+    }
   }
 
   /** GET /topup/:ref — owner only. Reads Pi5 only; the poller owns confirmation. */
@@ -165,11 +339,15 @@ export class TopupService {
 
   // ---- Poller-facing helpers (Pi5 only) ------------------------------------
 
-  /** Oldest pending, not-yet-expired top-ups (the poller polls these against PlernPay). */
+  /**
+   * Oldest pending, not-yet-expired PLERNPAY top-ups (the poller polls these against PlernPay).
+   * Thunder rows are NEVER polled — they are credited synchronously via /topup/thunder/verify.
+   */
   async findPollable(limit: number): Promise<TopupRow[]> {
     return this.topupDb.query<TopupRow>(
       `SELECT * FROM topups
-        WHERE status = 'pending' AND (expires_at IS NULL OR expires_at > NOW())
+        WHERE status = 'pending' AND provider = 'plernpay'
+          AND (expires_at IS NULL OR expires_at > NOW())
         ORDER BY id ASC
         LIMIT ?`,
       [limit],

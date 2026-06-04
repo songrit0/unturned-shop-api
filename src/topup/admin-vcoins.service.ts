@@ -33,6 +33,13 @@ export interface AdminWalletView {
   log: VcoinLogEntry[];
 }
 
+export interface ProviderView {
+  key: string;
+  label: string | null;
+  enabled: boolean;
+  sort: number;
+}
+
 @Injectable()
 export class AdminVcoinsService {
   constructor(
@@ -248,5 +255,32 @@ export class AdminVcoinsService {
     } finally {
       conn.release();
     }
+  }
+
+  // ---- Provider registry (admin on/off) ------------------------------------
+
+  /** GET /admin/vcoins/providers — all providers (enabled + disabled), by sort. */
+  async listProviders(): Promise<ProviderView[]> {
+    const rows = await this.topupDb.query<{ key: string; label: string | null; enabled: number; sort: number }>(
+      `SELECT \`key\`, label, enabled, sort FROM topup_providers ORDER BY sort ASC, \`key\` ASC`,
+    );
+    return rows.map((r) => ({
+      key: r.key, label: r.label, enabled: Number(r.enabled) === 1, sort: Number(r.sort),
+    }));
+  }
+
+  /** POST /admin/vcoins/providers — toggle enabled. Rejects an unknown key. */
+  async setProvider(key: string, enabled: boolean): Promise<ProviderView> {
+    const exists = await this.topupDb.first<{ key: string }>(
+      `SELECT \`key\` FROM topup_providers WHERE \`key\` = ?`, [key],
+    );
+    if (!exists) throw new BadRequestException('unknown_provider');
+    await this.topupDb.query(
+      `UPDATE topup_providers SET enabled = ? WHERE \`key\` = ?`, [enabled ? 1 : 0, key],
+    );
+    const row = await this.topupDb.first<{ key: string; label: string | null; enabled: number; sort: number }>(
+      `SELECT \`key\`, label, enabled, sort FROM topup_providers WHERE \`key\` = ?`, [key],
+    );
+    return { key: row!.key, label: row!.label, enabled: Number(row!.enabled) === 1, sort: Number(row!.sort) };
   }
 }

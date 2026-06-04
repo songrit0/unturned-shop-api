@@ -31,6 +31,8 @@ export interface AppConfig {
   topupDb: { host: string; port: number; user: string; password: string; database: string };
   /** PlernPay PromptPay top-up gateway credentials (server-only secret). */
   plernpay: { baseUrl: string; clientId: string; clientSecret: string };
+  /** Thunder slip-verification gateway (manual PromptPay + slip upload). */
+  thunder: { apiKey: string; promptpayId: string; receiverName: string; baseUrl: string };
 }
 
 export default (): AppConfig => ({
@@ -110,5 +112,11 @@ export default (): AppConfig => ({
     baseUrl: process.env.PLERNPAY_BASE_URL || 'https://api.plernpay.com',
     clientId: process.env.PLERNPAY_CLIENT_ID || '',
     clientSecret: process.env.PLERNPAY_CLIENT_SECRET || '',
+  },
+  thunder: {
+    apiKey: process.env.THUNDER_API_KEY || '',
+    promptpayId: process.env.THUNDER_PROMPTPAY_ID || '',
+    receiverName: process.env.THUNDER_RECEIVER_NAME || '',
+    baseUrl: process.env.THUNDER_BASE_URL || 'https://api.thunder.in.th/v2',
   },
 });

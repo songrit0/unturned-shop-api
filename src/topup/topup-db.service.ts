@@ -87,9 +87,59 @@ export class TopupDbService implements OnModuleInit, OnModuleDestroy {
       // Idempotent migration: v_coin_log.actor (who performed an admin adjustment).
       await this.ensureColumn('v_coin_log', 'actor', `ADD COLUMN \`actor\` VARCHAR(64) NULL`);
 
-      this.log.log('Top-up schema ready (v_coins / topups / v_coin_log)');
+      // Multi-provider migration: which gateway minted the row + the verified bank transRef.
+      await this.ensureColumn('topups', 'provider', `ADD COLUMN \`provider\` VARCHAR(16) NOT NULL DEFAULT 'plernpay'`);
+      await this.ensureColumn('topups', 'trans_ref', `ADD COLUMN \`trans_ref\` VARCHAR(64) NULL`);
+      // UNIQUE so the same verified bank slip (transRef) can never be credited twice.
+      await this.ensureUniqueIndex('topups', 'uq_trans_ref', 'trans_ref');
+
+      // Provider registry (admin on/off toggle).
+      await this.query(
+        `CREATE TABLE IF NOT EXISTS topup_providers (
+          \`key\` VARCHAR(16) PRIMARY KEY,
+          label VARCHAR(64) NULL,
+          enabled TINYINT(1) NOT NULL DEFAULT 1,
+          sort INT NOT NULL DEFAULT 0
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+      );
+      await this.seedProviders();
+
+      this.log.log('Top-up schema ready (v_coins / topups / v_coin_log / topup_providers)');
     } catch (e: any) {
       this.log.error(`Top-up schema ensure failed: ${e.message}`);
+    }
+  }
+
+  /** Seed the provider registry once, only when the table is empty. */
+  private async seedProviders() {
+    try {
+      const cnt = await this.first<{ c: number }>(`SELECT COUNT(*) AS c FROM topup_providers`);
+      if (cnt && Number(cnt.c) > 0) return;
+      await this.query(
+        `INSERT INTO topup_providers (\`key\`, label, enabled, sort) VALUES
+           ('plernpay', 'PlernPay (PromptPay auto)', 1, 1),
+           ('thunder',  'Thunder (slip upload)',     1, 2)`,
+      );
+      this.log.log('Top-up providers seeded (plernpay, thunder)');
+    } catch (e: any) {
+      this.log.warn(`Top-up provider seed failed: ${e.message}`);
+    }
+  }
+
+  /** Add a UNIQUE index only if it doesn't already exist (information_schema-guarded, idempotent). */
+  private async ensureUniqueIndex(table: string, indexName: string, column: string) {
+    const dbName = this.cfg.get<string>('topupDb.database');
+    try {
+      const exists = await this.first<{ c: number }>(
+        `SELECT COUNT(*) AS c FROM information_schema.STATISTICS
+         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND INDEX_NAME = ?`,
+        [dbName, table, indexName],
+      );
+      if (exists && Number(exists.c) > 0) return;
+      await this.query(`ALTER TABLE \`${table}\` ADD UNIQUE INDEX \`${indexName}\` (\`${column}\`)`);
+      this.log.log(`Top-up migration: added UNIQUE index ${table}.${indexName}`);
+    } catch (e: any) {
+      this.log.warn(`Top-up migration index ${table}.${indexName} failed: ${e.message}`);
     }
   }
 

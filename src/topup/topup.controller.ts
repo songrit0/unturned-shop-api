@@ -7,17 +7,29 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { IsInt } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsString } from 'class-validator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtPayload } from '../auth/strategies/jwt.strategy';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { TopupService } from './topup.service';
+import { TopupProvider } from './topup.types';
 
 class CreateTopupDto {
   /** Whole baht to charge. Range enforced server-side against TOPUP_MIN/MAX_BAHT. */
   @IsInt()
   baht!: number;
+
+  /** Payment provider. Defaults to 'plernpay'. Must be enabled in topup_providers. */
+  @IsOptional()
+  @IsIn(['plernpay', 'thunder'])
+  provider?: TopupProvider;
+}
+
+class ThunderVerifyDto {
+  @IsString() ref!: string;
+  /** Base64-encoded bank-transfer slip image. */
+  @IsString() slip_base64!: string;
 }
 
 @Controller('topup')
@@ -27,7 +39,12 @@ export class TopupController {
 
   @Post('create')
   create(@CurrentUser() user: JwtPayload, @Body() body: CreateTopupDto) {
-    return this.topup.create(user, body.baht);
+    return this.topup.create(user, body.baht, body.provider ?? 'plernpay');
+  }
+
+  @Post('thunder/verify')
+  verifyThunder(@CurrentUser() user: JwtPayload, @Body() body: ThunderVerifyDto) {
+    return this.topup.thunderVerify(user, body.ref, body.slip_base64);
   }
 
   @Get('me')

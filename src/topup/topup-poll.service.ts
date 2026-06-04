@@ -53,7 +53,10 @@ export class TopupPollService implements OnModuleInit {
       for (const row of stale) {
         try {
           await this.topup.markExpired(row.ref);
-          await this.plernpay.cancelTopup(row.ref); // best-effort
+          // Only PlernPay has a gateway charge to cancel; Thunder rows just get marked expired.
+          if (row.provider === 'plernpay') {
+            await this.plernpay.cancelTopup(row.ref); // best-effort
+          }
           expired += 1;
         } catch (e: any) {
           this.log.warn(`Top-up expire ${row.ref} failed: ${e.message}`);
