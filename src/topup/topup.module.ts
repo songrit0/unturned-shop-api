@@ -5,6 +5,8 @@ import { TopupService } from './topup.service';
 import { TopupDbService } from './topup-db.service';
 import { PlernpayService } from './plernpay.service';
 import { TopupPollService } from './topup-poll.service';
+import { AdminVcoinsController } from './admin-vcoins.controller';
+import { AdminVcoinsService } from './admin-vcoins.service';
 
 /**
  * Real-money Vcoin top-up via PlernPay. Vcoin wallet + records live in a SEPARATE Pi5-local
@@ -13,8 +15,8 @@ import { TopupPollService } from './topup-poll.service';
  */
 @Module({
   imports: [ScheduleModule.forRoot()],
-  controllers: [TopupController, VcoinsController, TopupConfigController],
-  providers: [TopupService, TopupDbService, PlernpayService, TopupPollService],
+  controllers: [TopupController, VcoinsController, TopupConfigController, AdminVcoinsController],
+  providers: [TopupService, TopupDbService, PlernpayService, TopupPollService, AdminVcoinsService],
   exports: [TopupService],
 })
 export class TopupModule {}

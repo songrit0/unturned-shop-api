@@ -84,9 +84,29 @@ export class TopupDbService implements OnModuleInit, OnModuleDestroy {
           INDEX idx_steam (steam_id)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
       );
+      // Idempotent migration: v_coin_log.actor (who performed an admin adjustment).
+      await this.ensureColumn('v_coin_log', 'actor', `ADD COLUMN \`actor\` VARCHAR(64) NULL`);
+
       this.log.log('Top-up schema ready (v_coins / topups / v_coin_log)');
     } catch (e: any) {
       this.log.error(`Top-up schema ensure failed: ${e.message}`);
+    }
+  }
+
+  /** Add a column only if it doesn't already exist (information_schema-guarded, idempotent). */
+  private async ensureColumn(table: string, column: string, ddl: string) {
+    const dbName = this.cfg.get<string>('topupDb.database');
+    try {
+      const exists = await this.first<{ c: number }>(
+        `SELECT COUNT(*) AS c FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
+        [dbName, table, column],
+      );
+      if (exists && Number(exists.c) > 0) return;
+      await this.query(`ALTER TABLE \`${table}\` ${ddl}`);
+      this.log.log(`Top-up migration: added ${table}.${column}`);
+    } catch (e: any) {
+      this.log.warn(`Top-up migration ${table}.${column} failed: ${e.message}`);
     }
   }
 
