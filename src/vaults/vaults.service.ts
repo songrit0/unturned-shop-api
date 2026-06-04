@@ -9,6 +9,7 @@ import * as mysql from 'mysql2/promise';
 import { DbService } from '../database/db.service';
 import { Paginated, normalizePage } from '../common/pagination';
 import { VaultDetail, VaultItem, VaultItemView, VaultSummary } from './vaults.types';
+import { buildGunView, collectAttachmentIds, parseGunState } from '../p2p/gun-state';
 
 const LOCK_HOLDER = 'web-api';
 const LOCK_TTL_MIN = 15;
@@ -100,7 +101,13 @@ export class VaultsService {
     if (!row) throw new NotFoundException('Vault not found');
 
     const parsed = this.parseData(row.Data);
-    const itemIds = Array.from(new Set(parsed.map((it) => it.Id))).filter((id) => Number.isFinite(id));
+    // Parse gun state per item up front so attachment ids join the single metadata lookup.
+    const guns = parsed.map((it) => parseGunState(it.State));
+    const idSet = new Set<number>();
+    for (const it of parsed) if (Number.isFinite(it.Id)) idSet.add(Number(it.Id));
+    for (const g of guns) if (g) for (const aid of collectAttachmentIds(g)) idSet.add(aid);
+    const itemIds = [...idSet];
+
     let metaById = new Map<number, { name: string; description: string | null; image_url: string | null; type_id: number | null; type_name: string | null }>();
     if (itemIds.length > 0) {
       const placeholders = itemIds.map(() => '?').join(',');
@@ -113,8 +120,13 @@ export class VaultsService {
       metaById = new Map(meta.map((m) => [Number(m.id), { name: m.name, description: m.description, image_url: m.image_url, type_id: m.type_id, type_name: m.type_name }]));
     }
 
-    const itemsView: VaultItemView[] = parsed.map((it) => {
+    // id -> name map for attachment resolution (reuses the metadata we just fetched).
+    const nameById = new Map<number, string | null>();
+    for (const [id, m] of metaById) nameById.set(id, m.name ?? null);
+
+    const itemsView: VaultItemView[] = parsed.map((it, i) => {
       const m = metaById.get(Number(it.Id));
+      const g = guns[i];
       return {
         ...it,
         name: m?.name ?? null,
@@ -122,6 +134,7 @@ export class VaultsService {
         image_url: m?.image_url ?? null,
         type_id: m?.type_id ?? null,
         type_name: m?.type_name ?? null,
+        gun: g ? buildGunView(g, nameById) : null,
       };
     });
 

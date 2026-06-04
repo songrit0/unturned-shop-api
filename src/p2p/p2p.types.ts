@@ -1,3 +1,5 @@
+import { GunView } from './gun-state';
+
 export type P2PStatus = 'active' | 'sold' | 'cancelled' | 'expired';
 export type P2PAction = 'list' | 'buy' | 'cancel' | 'expire' | 'admin_force_close';
 
@@ -38,6 +40,11 @@ export interface P2PListingView extends P2PListingRow {
    * Null if not bought yet or buyer is not linked.
    */
   buyer_discord_name: string | null;
+  /**
+   * Parsed gun attachments + ammo when the held item's `state` decodes as a gun.
+   * Null when the state doesn't parse as a gun (e.g. a magazine stack with empty state).
+   */
+  gun: GunView | null;
 }
 
 export interface CreateListingInput {

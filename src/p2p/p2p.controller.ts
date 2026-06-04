@@ -111,12 +111,28 @@ export class P2pConfigController {
   constructor(private readonly cfg: ConfigService) {}
 
   @Get()
-  get(): { commission: number; ttl_days: number } {
+  get(): {
+    commission: number;
+    ttl_days: number;
+    commission_pct: number;
+    refund_code_ttl_days: number;
+    cancel_penalty_pct: number;
+  } {
     const pct = Number(this.cfg.get<number>('p2p.commissionPercent') ?? 5);
     const ttl = Number(this.cfg.get<number>('p2p.ttlDays') ?? 7);
+    const refundTtl = Number(this.cfg.get<number>('p2p.refundCodeTtlDays') ?? 7);
+    const cancelPenaltyRaw = Number(this.cfg.get<number>('p2p.cancelPenaltyPct') ?? 25);
+    const cancelPenalty = Number.isFinite(cancelPenaltyRaw)
+      ? Math.min(100, Math.max(0, cancelPenaltyRaw))
+      : 25;
     return {
+      // existing fields (kept for backward compatibility): commission as a 0-1 fraction
       commission: Math.min(1, Math.max(0, pct / 100)),
       ttl_days: ttl,
+      // new percent-based fields the web/bot warning reads
+      commission_pct: Math.min(100, Math.max(0, pct)),
+      refund_code_ttl_days: refundTtl,
+      cancel_penalty_pct: cancelPenalty,
     };
   }
 }

@@ -22,6 +22,7 @@ import {
   P2PListingRow,
   P2PListingView,
 } from './p2p.types';
+import { buildGunView, collectAttachmentIds, parseGunState } from './gun-state';
 
 @Injectable()
 export class P2pService {
@@ -46,6 +47,32 @@ export class P2pService {
     const v = Number(this.cfg.get<number>('p2p.commissionPercent') ?? 5);
     if (!Number.isFinite(v) || v < 0) return 0;
     return Math.min(100, v);
+  }
+
+  /**
+   * Populate `gun` on listing views by parsing each row's `state` and batch-resolving
+   * attachment ids to names from sv_items in a single query (no N+1). Mutates + returns rows.
+   */
+  private async enrichGun(rows: P2PListingView[]): Promise<P2PListingView[]> {
+    const parsed = rows.map((r) => parseGunState(r.state));
+    const ids = new Set<number>();
+    for (const g of parsed) if (g) for (const id of collectAttachmentIds(g)) ids.add(id);
+
+    const names = new Map<number, string | null>();
+    if (ids.size > 0) {
+      const idList = [...ids];
+      const nameRows = await this.db.query<{ id: number; name: string | null }>(
+        `SELECT id, name FROM ${this.itemsTbl()} WHERE id IN (${idList.map(() => '?').join(',')})`,
+        idList,
+      );
+      for (const nr of nameRows) names.set(Number(nr.id), nr.name ?? null);
+    }
+
+    rows.forEach((r, i) => {
+      const g = parsed[i];
+      r.gun = g ? buildGunView(g, names) : null;
+    });
+    return rows;
   }
 
   async listActive(filters: ListingsFilter): Promise<Paginated<P2PListingView>> {
@@ -84,6 +111,7 @@ export class P2pService {
        LIMIT ? OFFSET ?`,
       [...params, np.limit, np.offset],
     );
+    await this.enrichGun(rows);
     return { items: rows, total, page: np.page, limit: np.limit, pages: Math.ceil(total / np.limit) };
   }
 
@@ -101,6 +129,7 @@ export class P2pService {
       [id],
     );
     if (!row) throw new NotFoundException('Listing not found');
+    await this.enrichGun([row]);
     return row;
   }
 
@@ -124,6 +153,7 @@ export class P2pService {
        LIMIT ? OFFSET ?`,
       [steamId, np.limit, np.offset],
     );
+    await this.enrichGun(rows);
     return { items: rows, total, page: np.page, limit: np.limit, pages: Math.ceil(total / np.limit) };
   }
 
@@ -383,7 +413,23 @@ export class P2pService {
             WHERE id = ?`,
           [finalStatus, code, codeExpiresAt, listingId],
         );
-        await this.writeLog(conn, listingId, action, actor, { refund_code: code, code_expires_at: codeExpiresAt });
+
+        // 3) Cancel penalty — ONLY on a voluntary seller cancel (not expire / not admin force-close).
+        //    Debit the seller WITHOUT a `balance >= ?` guard: sv_coins.balance is a signed BIGINT and
+        //    the penalty is allowed to push it negative (the seller still gets the item back via the code).
+        const logMeta: Record<string, unknown> = { refund_code: code, code_expires_at: codeExpiresAt };
+        if (action === 'cancel') {
+          const penalty = Math.round(Number(listing.price) * this.cancelPenaltyPct() / 100);
+          if (penalty > 0) {
+            await conn.query(
+              `INSERT INTO ${this.coinsTbl()} (steam_id, balance) VALUES (?, ?)
+               ON DUPLICATE KEY UPDATE balance = balance + VALUES(balance)`,
+              [sellerSteam, -penalty],
+            );
+          }
+          logMeta.cancel_penalty = penalty;
+        }
+        await this.writeLog(conn, listingId, action, actor, logMeta);
 
         // The atomic core (code mint + listing close + log) commits here. The notification
         // below is intentionally OUTSIDE this txn so a not-yet-applied 006 migration can't
@@ -446,6 +492,13 @@ export class P2pService {
   private refundCodeTtlDays(): number {
     const v = Number(this.cfg.get<number>('p2p.refundCodeTtlDays') ?? 7);
     return Number.isFinite(v) && v > 0 ? Math.floor(v) : 7;
+  }
+
+  /** Penalty percent (0..100) charged to the seller on a voluntary cancel. Default 25. */
+  private cancelPenaltyPct(): number {
+    const v = Number(this.cfg.get<number>('p2p.cancelPenaltyPct') ?? 25);
+    if (!Number.isFinite(v)) return 25;
+    return Math.min(100, Math.max(0, v));
   }
 
   private notificationKind(action: Extract<P2PAction, 'cancel' | 'admin_force_close' | 'expire'>): string {

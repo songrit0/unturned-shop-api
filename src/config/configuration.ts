@@ -11,7 +11,7 @@ export interface AppConfig {
   ngrok: { authtoken: string; domain: string };
   firebase: { serviceAccountPath: string; apiUrlDoc: string };
   wealthTax: { percent: number; threshold: number; cron: string };
-  p2p: { commissionPercent: number; ttlDays: number; expireCron: string; refundCodeTtlDays: number };
+  p2p: { commissionPercent: number; ttlDays: number; expireCron: string; refundCodeTtlDays: number; cancelPenaltyPct: number };
   /** Commission taken when a player sells to the shop. Mirror SellVault's BaseCommissionPercent. */
   shop: { sellCommissionPercent: number };
 }
@@ -64,6 +64,9 @@ export default (): AppConfig => ({
     expireCron: process.env.P2P_EXPIRE_CRON || '*/15 * * * *',
     // Lifetime of the refund redeem code minted when a listing is cancelled/expired/force-closed.
     refundCodeTtlDays: parseInt(process.env.P2P_REFUND_CODE_TTL_DAYS || '7', 10),
+    // Penalty (% of listing price) charged to the seller when they CANCEL an active listing.
+    // Not applied on expire or admin force-close. Seller balance may go negative.
+    cancelPenaltyPct: parseFloat(process.env.P2P_CANCEL_PENALTY_PCT || '25'),
   },
   shop: {
     // Default 40 mirrors SellVault.BaseCommissionPercent (player receives 60% of market price).

@@ -11,6 +11,8 @@ export interface VaultItem {
   Id: number;
 }
 
+import { GunView } from '../p2p/gun-state';
+
 /** Item plus joined metadata from sv_items, returned on read endpoints. */
 export interface VaultItemView extends VaultItem {
   name: string | null;
@@ -18,6 +20,11 @@ export interface VaultItemView extends VaultItem {
   image_url: string | null;
   type_id: number | null;
   type_name: string | null;
+  /**
+   * Parsed gun attachments + ammo when `State` decodes as a gun.
+   * Null when the state doesn't parse as a gun (e.g. a magazine stack with empty state).
+   */
+  gun: GunView | null;
 }
 
 export interface VaultSummary {
