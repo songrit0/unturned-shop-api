@@ -8,6 +8,8 @@ export interface VipPackageRow {
   group_id: string;
   days: number;
   price_coins: number;
+  /** Meowcoin price, or null when this package is not buyable with Meowcoin. */
+  price_meowcoins: number | null;
   label: string | null;
   sort: number;
   enabled: number;
@@ -29,9 +31,16 @@ export interface VipPackageInput {
   group_id: string;
   days: number;
   price_coins: number;
+  /** Meowcoin price; null/0/omitted = not sold with Meowcoin. */
+  price_meowcoins?: number | null;
   label?: string;
   sort?: number;
   enabled?: boolean;
+}
+
+/** Normalize a Meowcoin price input to a positive int, or null when not sold with Meowcoin. */
+function meowPrice(v: number | null | undefined): number | null {
+  return v != null && Number(v) > 0 ? Math.trunc(Number(v)) : null;
 }
 
 /**
@@ -51,7 +60,7 @@ export class AdminVipService {
 
   async listPackages(): Promise<VipPackageRow[]> {
     return this.db.query<VipPackageRow>(
-      `SELECT id, tier, group_id, days, price_coins, label, sort, enabled
+      `SELECT id, tier, group_id, days, price_coins, price_meowcoins, label, sort, enabled
        FROM ${this.pkgTable()} ORDER BY sort ASC, price_coins ASC`,
     );
   }
@@ -59,10 +68,10 @@ export class AdminVipService {
   async createPackage(input: VipPackageInput): Promise<VipPackageRow> {
     this.validatePackage(input);
     const res: any = await this.db.query(
-      `INSERT INTO ${this.pkgTable()} (tier, group_id, days, price_coins, label, sort, enabled)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO ${this.pkgTable()} (tier, group_id, days, price_coins, price_meowcoins, label, sort, enabled)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        input.tier, input.group_id, input.days, input.price_coins,
+        input.tier, input.group_id, input.days, input.price_coins, meowPrice(input.price_meowcoins),
         input.label ?? null, input.sort ?? 0, input.enabled === false ? 0 : 1,
       ],
     );
@@ -72,7 +81,7 @@ export class AdminVipService {
 
   async getPackage(id: number): Promise<VipPackageRow> {
     const row = await this.db.first<VipPackageRow>(
-      `SELECT id, tier, group_id, days, price_coins, label, sort, enabled
+      `SELECT id, tier, group_id, days, price_coins, price_meowcoins, label, sort, enabled
        FROM ${this.pkgTable()} WHERE id = ? LIMIT 1`,
       [id],
     );
@@ -86,7 +95,9 @@ export class AdminVipService {
     const params: any[] = [];
     const map: Record<string, any> = {
       tier: input.tier, group_id: input.group_id, days: input.days,
-      price_coins: input.price_coins, label: input.label, sort: input.sort,
+      price_coins: input.price_coins,
+      price_meowcoins: input.price_meowcoins === undefined ? undefined : meowPrice(input.price_meowcoins),
+      label: input.label, sort: input.sort,
       enabled: input.enabled === undefined ? undefined : input.enabled ? 1 : 0,
     };
     for (const [col, val] of Object.entries(map)) {
@@ -221,5 +232,9 @@ export class AdminVipService {
     if (!input.group_id?.trim()) throw new BadRequestException('group_id required');
     if (!Number.isInteger(input.days) || input.days <= 0) throw new BadRequestException('days must be a positive integer');
     if (!Number.isFinite(input.price_coins) || input.price_coins < 0) throw new BadRequestException('price_coins must be >= 0');
+    // A package must be sellable in at least one currency: Coin (price_coins>0) or Meowcoin (price_meowcoins>0).
+    if (!(input.price_coins > 0) && meowPrice(input.price_meowcoins) == null) {
+      throw new BadRequestException('price_required');
+    }
   }
 }

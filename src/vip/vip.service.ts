@@ -116,6 +116,9 @@ export class VipService {
       const days = Number(pkg.days);
       const groupId = pkg.group_id as string;
 
+      // price_coins <= 0 means this package is not sold with Coin (e.g. Meowcoin-only).
+      if (!(price > 0)) { await conn.rollback(); throw new BadRequestException('coin_not_available'); }
+
       // ensure a coins row exists, then lock it
       await conn.query(
         `INSERT INTO ${this.coinsT()} (steam_id, balance) VALUES (?, 0) ON DUPLICATE KEY UPDATE balance = balance`,

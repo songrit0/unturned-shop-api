@@ -15,6 +15,7 @@ class PackageDto {
   @IsString() @MaxLength(64) group_id!: string;
   @IsInt() @Min(1) days!: number;
   @IsInt() @Min(0) price_coins!: number;
+  @IsOptional() @IsInt() @Min(0) price_meowcoins?: number | null;
   @IsOptional() @IsString() @MaxLength(64) label?: string;
   @IsOptional() @IsInt() sort?: number;
   @IsOptional() @IsBoolean() enabled?: boolean;
@@ -25,6 +26,7 @@ class PackagePatchDto {
   @IsOptional() @IsString() @MaxLength(64) group_id?: string;
   @IsOptional() @IsInt() @Min(1) days?: number;
   @IsOptional() @IsInt() @Min(0) price_coins?: number;
+  @IsOptional() @IsInt() @Min(0) price_meowcoins?: number | null;
   @IsOptional() @IsString() @MaxLength(64) label?: string;
   @IsOptional() @IsInt() sort?: number;
   @IsOptional() @IsBoolean() enabled?: boolean;
