@@ -4,6 +4,7 @@ import {
 import {
   IsBoolean, IsInt, IsISO8601, IsOptional, IsString, MaxLength, Min,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { AdminGuard } from '../common/guards/admin.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -13,22 +14,22 @@ import { AdminVipService } from './admin-vip.service';
 class PackageDto {
   @IsString() @MaxLength(32) tier!: string;
   @IsString() @MaxLength(64) group_id!: string;
-  @IsInt() @Min(1) days!: number;
-  @IsInt() @Min(0) price_coins!: number;
-  @IsOptional() @IsInt() @Min(0) price_meowcoins?: number | null;
+  @Type(() => Number) @IsInt() @Min(1) days!: number;
+  @Type(() => Number) @IsInt() @Min(0) price_coins!: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(0) price_meowcoins?: number | null;
   @IsOptional() @IsString() @MaxLength(64) label?: string;
-  @IsOptional() @IsInt() sort?: number;
+  @IsOptional() @Type(() => Number) @IsInt() sort?: number;
   @IsOptional() @IsBoolean() enabled?: boolean;
 }
 
 class PackagePatchDto {
   @IsOptional() @IsString() @MaxLength(32) tier?: string;
   @IsOptional() @IsString() @MaxLength(64) group_id?: string;
-  @IsOptional() @IsInt() @Min(1) days?: number;
-  @IsOptional() @IsInt() @Min(0) price_coins?: number;
-  @IsOptional() @IsInt() @Min(0) price_meowcoins?: number | null;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) days?: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(0) price_coins?: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(0) price_meowcoins?: number | null;
   @IsOptional() @IsString() @MaxLength(64) label?: string;
-  @IsOptional() @IsInt() sort?: number;
+  @IsOptional() @Type(() => Number) @IsInt() sort?: number;
   @IsOptional() @IsBoolean() enabled?: boolean;
 }
 
