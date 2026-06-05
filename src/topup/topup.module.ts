@@ -8,6 +8,7 @@ import { ThunderService } from './thunder.service';
 import { TopupPollService } from './topup-poll.service';
 import { AdminMeowcoinsController } from './admin-meowcoins.controller';
 import { AdminMeowcoinsService } from './admin-meowcoins.service';
+import { MeowcoinWalletService } from './meowcoin-wallet.service';
 
 /**
  * Real-money Meowcoin top-up via PlernPay (auto) + Thunder (slip upload). Meowcoin wallet + records
@@ -17,7 +18,7 @@ import { AdminMeowcoinsService } from './admin-meowcoins.service';
 @Module({
   imports: [ScheduleModule.forRoot()],
   controllers: [TopupController, MeowcoinsController, TopupConfigController, AdminMeowcoinsController],
-  providers: [TopupService, TopupDbService, PlernpayService, ThunderService, TopupPollService, AdminMeowcoinsService],
-  exports: [TopupService],
+  providers: [TopupService, TopupDbService, PlernpayService, ThunderService, TopupPollService, AdminMeowcoinsService, MeowcoinWalletService],
+  exports: [TopupService, MeowcoinWalletService],
 })
 export class TopupModule {}

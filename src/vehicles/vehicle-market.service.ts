@@ -10,6 +10,8 @@ export interface VehicleMarketItem {
   image_url: string | null;
   type_id: number | null;
   type_name: string | null;
+  /** Meowcoin price, or null when not buyable with Meowcoin. */
+  meowcoin_price: number | null;
 }
 
 @Injectable()
@@ -46,7 +48,7 @@ export class VehicleMarketService {
 
     const rows = await this.db.query<VehicleMarketItem>(
       `SELECT m.vehicle_id, v.name, m.price, m.amount,
-              v.image_url, v.type_id, t.name AS type_name
+              v.image_url, v.type_id, t.name AS type_name, m.meowcoin_price
        FROM ${market} m
        LEFT JOIN ${vehicles} v ON v.id = m.vehicle_id
        LEFT JOIN ${itemTypes} t ON t.id = v.type_id
@@ -64,7 +66,7 @@ export class VehicleMarketService {
     const itemTypes = this.db.table('sv', 'item_types');
     return this.db.first<VehicleMarketItem>(
       `SELECT m.vehicle_id, v.name, m.price, m.amount,
-              v.image_url, v.type_id, t.name AS type_name
+              v.image_url, v.type_id, t.name AS type_name, m.meowcoin_price
        FROM ${market} m
        LEFT JOIN ${vehicles} v ON v.id = m.vehicle_id
        LEFT JOIN ${itemTypes} t ON t.id = v.type_id

@@ -15,6 +15,7 @@ export interface AdminMarketItem {
   type_name: string | null;
   enabled: number;             // 1 = shop BUYS it (sell-to-shop board)
   enabled_isforsell: number;   // 1 = shop SELLS it (Shop page)
+  meowcoin_price: number | null; // Meowcoin price, null = not buyable with Meowcoin
 }
 
 export interface UpsertInput {
@@ -25,6 +26,8 @@ export interface UpsertInput {
   elasticity: number;
   enabled: boolean;            // shop buys it
   enabledIsForSell: boolean;   // shop sells it
+  /** Meowcoin price; null/undefined clears it (not buyable with Meowcoin). */
+  meowcoinPrice?: number | null;
 }
 
 export interface MarketExportRow {
@@ -35,6 +38,7 @@ export interface MarketExportRow {
   amount: number;
   enabled: boolean;
   enabled_isforsell: boolean;
+  meowcoin_price: number | null;
 }
 
 export interface ImportResult {
@@ -55,7 +59,8 @@ export class AdminMarketService {
     const sql =
       `SELECT m.item_id, i.name, i.description, m.price, m.amount,
               m.base_price, m.target_stock, m.elasticity,
-              i.image_url, i.type_id, t.name AS type_name, m.enabled, m.enabled_isforsell
+              i.image_url, i.type_id, t.name AS type_name, m.enabled, m.enabled_isforsell,
+              m.meowcoin_price
        FROM ${market} m
        LEFT JOIN ${items} i ON i.id = m.item_id
        LEFT JOIN ${types} t ON t.id = i.type_id
@@ -79,7 +84,7 @@ export class AdminMarketService {
   async exportAll(): Promise<MarketExportRow[]> {
     const market = this.db.table('sv', 'market');
     const rows = await this.db.query<any>(
-      `SELECT item_id, base_price, target_stock, elasticity, amount, enabled, enabled_isforsell
+      `SELECT item_id, base_price, target_stock, elasticity, amount, enabled, enabled_isforsell, meowcoin_price
        FROM ${market} ORDER BY item_id ASC`,
     );
     return rows.map(r => ({
@@ -90,6 +95,7 @@ export class AdminMarketService {
       amount: Number(r.amount),
       enabled: !!r.enabled,
       enabled_isforsell: !!r.enabled_isforsell,
+      meowcoin_price: r.meowcoin_price == null ? null : Number(r.meowcoin_price),
     }));
   }
 
@@ -135,16 +141,23 @@ export class AdminMarketService {
     // satisfies NOT NULL constraints on legacy sv_market.name / sv_market.image_url
     // when SHOP_API_DROP_LEGACY_MARKET_COLS is unset. After those columns are dropped,
     // remove `name`, `image_url` from the column list and the SELECT projection.
+    // Normalise the Meowcoin price tag: a finite int >= 0 sets it, anything else (null/undefined/blank) clears it.
+    const meowcoinPrice =
+      i.meowcoinPrice == null || !Number.isFinite(Number(i.meowcoinPrice))
+        ? null
+        : Math.trunc(Number(i.meowcoinPrice));
+
     await this.db.query(
-      `INSERT INTO ${market} (item_id, name, image_url, price, amount, base_price, target_stock, elasticity, enabled, enabled_isforsell)
-       SELECT ?, i.name, i.image_url, ?, ?, ?, ?, ?, ?, ?
+      `INSERT INTO ${market} (item_id, name, image_url, price, amount, base_price, target_stock, elasticity, enabled, enabled_isforsell, meowcoin_price)
+       SELECT ?, i.name, i.image_url, ?, ?, ?, ?, ?, ?, ?, ?
        FROM ${items} i WHERE i.id = ?
        ON DUPLICATE KEY UPDATE
          amount = VALUES(amount),
          base_price = VALUES(base_price), target_stock = VALUES(target_stock), elasticity = VALUES(elasticity),
-         enabled = VALUES(enabled), enabled_isforsell = VALUES(enabled_isforsell)`,
+         enabled = VALUES(enabled), enabled_isforsell = VALUES(enabled_isforsell),
+         meowcoin_price = VALUES(meowcoin_price)`,
       [i.item_id, i.base_price, i.amount, i.base_price, i.target_stock, i.elasticity,
-       i.enabled ? 1 : 0, i.enabledIsForSell ? 1 : 0, i.item_id],
+       i.enabled ? 1 : 0, i.enabledIsForSell ? 1 : 0, meowcoinPrice, i.item_id],
     );
     await this.pricing.recomputeFor([i.item_id]);
     return this.getOne(i.item_id);

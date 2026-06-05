@@ -14,6 +14,8 @@ class UpsertMarketDto {
   @IsInt() @Min(0) amount!: number;
   @IsOptional() @IsBoolean() enabled?: boolean;            // shop buys it
   @IsOptional() @IsBoolean() enabled_isforsell?: boolean;  // shop sells it
+  // Meowcoin price; null/omitted clears it (not buyable with Meowcoin).
+  @IsOptional() @IsInt() @Min(0) meowcoin_price?: number | null;
 }
 
 class ImportMarketDto {
@@ -55,6 +57,7 @@ export class AdminMarketController {
       amount: b.amount,
       enabled: b.enabled !== false,
       enabledIsForSell: b.enabled_isforsell !== false,
+      meowcoinPrice: b.meowcoin_price ?? null,
     })));
   }
 
@@ -66,6 +69,7 @@ export class AdminMarketController {
       amount: body.amount,
       enabled: body.enabled !== false,
       enabledIsForSell: body.enabled_isforsell !== false,
+      meowcoinPrice: body.meowcoin_price ?? null,
     });
   }
 

@@ -12,6 +12,7 @@ export interface AdminVehicleMarketItem {
   type_id: number | null;
   type_name: string | null;
   enabled: number;        // 1 = shop SELLS it (Shop page)
+  meowcoin_price: number | null; // Meowcoin price, null = not buyable with Meowcoin
 }
 
 export interface UpsertVehicleMarketInput {
@@ -19,6 +20,8 @@ export interface UpsertVehicleMarketInput {
   price: number;
   amount: number;
   enabled: boolean;
+  /** Meowcoin price; null/undefined clears it (not buyable with Meowcoin). */
+  meowcoinPrice?: number | null;
 }
 
 @Injectable()
@@ -31,7 +34,7 @@ export class AdminVehicleMarketService {
     const types = this.db.table('sv', 'item_types');
     const sql =
       `SELECT m.vehicle_id, v.name, v.description, m.price, m.amount,
-              v.image_url, v.type_id, t.name AS type_name, m.enabled
+              v.image_url, v.type_id, t.name AS type_name, m.enabled, m.meowcoin_price
        FROM ${market} m
        LEFT JOIN ${vehicles} v ON v.id = m.vehicle_id
        LEFT JOIN ${types} t ON t.id = v.type_id
@@ -69,14 +72,21 @@ export class AdminVehicleMarketService {
       throw new BadRequestException('Vehicle not found in catalog');
     }
 
+    // Normalise the Meowcoin price tag: a finite int >= 0 sets it, anything else clears it.
+    const meowcoinPrice =
+      i.meowcoinPrice == null || !Number.isFinite(Number(i.meowcoinPrice))
+        ? null
+        : Math.trunc(Number(i.meowcoinPrice));
+
     await this.db.query(
-      `INSERT INTO ${market} (vehicle_id, price, amount, enabled)
-       VALUES (?, ?, ?, ?)
+      `INSERT INTO ${market} (vehicle_id, price, amount, enabled, meowcoin_price)
+       VALUES (?, ?, ?, ?, ?)
        ON DUPLICATE KEY UPDATE
          price = VALUES(price),
          amount = VALUES(amount),
-         enabled = VALUES(enabled)`,
-      [i.vehicle_id, i.price, i.amount, i.enabled ? 1 : 0],
+         enabled = VALUES(enabled),
+         meowcoin_price = VALUES(meowcoin_price)`,
+      [i.vehicle_id, i.price, i.amount, i.enabled ? 1 : 0, meowcoinPrice],
     );
     return this.getOne(i.vehicle_id);
   }

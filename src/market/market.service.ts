@@ -14,6 +14,8 @@ export interface MarketItem {
   image_url: string | null;
   type_id: number | null;
   type_name: string | null;
+  /** Meowcoin price, or null when not buyable with Meowcoin. */
+  meowcoin_price: number | null;
 }
 
 export type MarketKind = 'normal' | 'bills' | 'all';
@@ -81,7 +83,7 @@ export class MarketService {
 
     const rows = await this.db.query<MarketItem>(
       `SELECT m.item_id, i.name, i.description, m.price, m.base_price, m.amount, m.target_stock,
-              i.image_url, i.type_id, t.name AS type_name
+              i.image_url, i.type_id, t.name AS type_name, m.meowcoin_price
        FROM ${market} m
        LEFT JOIN ${items} i ON i.id = m.item_id
        LEFT JOIN ${itemTypes} t ON t.id = i.type_id
@@ -165,7 +167,7 @@ export class MarketService {
     const itemTypes = this.db.table('sv', 'item_types');
     return this.db.first<MarketItem>(
       `SELECT m.item_id, i.name, i.description, m.price, m.base_price, m.amount, m.target_stock,
-              i.image_url, i.type_id, t.name AS type_name
+              i.image_url, i.type_id, t.name AS type_name, m.meowcoin_price
        FROM ${market} m
        LEFT JOIN ${items} i ON i.id = m.item_id
        LEFT JOIN ${itemTypes} t ON t.id = i.type_id

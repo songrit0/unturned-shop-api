@@ -10,6 +10,8 @@ class UpsertVehicleMarketDto {
   @IsNumber() @Min(0) price!: number;
   @IsInt() @Min(0) amount!: number;
   @IsOptional() @IsBoolean() enabled?: boolean;  // shop sells it
+  // Meowcoin price; null/omitted clears it (not buyable with Meowcoin).
+  @IsOptional() @IsInt() @Min(0) meowcoin_price?: number | null;
 }
 
 class ToggleDto { @IsBoolean() enabled!: boolean; }
@@ -30,6 +32,7 @@ export class AdminVehicleMarketController {
       price: body.price,
       amount: body.amount,
       enabled: body.enabled !== false,
+      meowcoinPrice: body.meowcoin_price ?? null,
     });
   }
 

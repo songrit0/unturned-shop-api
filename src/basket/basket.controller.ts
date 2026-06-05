@@ -13,7 +13,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtPayload } from '../auth/strategies/jwt.strategy';
 import { UsersService } from '../users/users.service';
-import { BasketService, BasketKind } from './basket.service';
+import { BasketService, BasketKind, Currency } from './basket.service';
 
 class BasketItemDto {
   @IsInt() item_id!: number;
@@ -25,6 +25,10 @@ class BasketSetDto {
   @IsInt() item_id!: number;
   @IsInt() @Min(0) qty!: number;
   @IsOptional() @IsIn(['item', 'vehicle']) kind?: BasketKind;
+}
+
+class CheckoutDto {
+  @IsOptional() @IsIn(['coin', 'meowcoin']) currency?: Currency;
 }
 
 @Controller('basket')
@@ -84,7 +88,7 @@ export class BasketController {
 
   @Post('checkout')
   @HttpCode(200)
-  async checkout(@CurrentUser() user: JwtPayload) {
-    return this.basket.checkout(await this.requireSteam(user));
+  async checkout(@CurrentUser() user: JwtPayload, @Body() body: CheckoutDto) {
+    return this.basket.checkout(await this.requireSteam(user), body?.currency ?? 'coin');
   }
 }

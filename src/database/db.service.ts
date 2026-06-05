@@ -90,6 +90,37 @@ export class DbService implements OnModuleInit, OnModuleDestroy {
 
     // P2P VirtualGarage listings + virtual_garage.listed_for_sale column (migration 011)
     await this.ensureP2PGarageTables();
+
+    // Per-item Meowcoin pricing columns (migration 012)
+    await this.ensureMeowcoinPricingColumns();
+  }
+
+  /**
+   * Per-item Meowcoin pricing (migration 012): three NULLABLE BIGINT price-tag columns
+   * (NULL = not buyable with Meowcoin). Additive + idempotent — safe on the shared shop DB.
+   */
+  private async ensureMeowcoinPricingColumns() {
+    const prefix = this.cfg.get('db.svPrefix') || 'sv_';
+    const dbName = this.cfg.get('db.database');
+    const cols: { table: string; col: string }[] = [
+      { table: `${prefix}market`, col: 'meowcoin_price' },
+      { table: `${prefix}vehicle_market`, col: 'meowcoin_price' },
+      { table: `${prefix}vip_packages`, col: 'price_meowcoins' },
+    ];
+    for (const r of cols) {
+      try {
+        const exists = await this.first<{ c: number }>(
+          `SELECT COUNT(*) AS c FROM information_schema.COLUMNS
+           WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
+          [dbName, r.table, r.col],
+        );
+        if (exists && Number(exists.c) > 0) continue;
+        await this.query(`ALTER TABLE \`${r.table}\` ADD COLUMN \`${r.col}\` BIGINT NULL DEFAULT NULL`);
+        this.log.log(`Migration: added ${r.table}.${r.col}`);
+      } catch (e: any) {
+        this.log.warn(`Migration ${r.table}.${r.col} failed: ${e.message}`);
+      }
+    }
   }
 
   /**
