@@ -58,14 +58,14 @@ export class TopupController {
   }
 }
 
-@Controller('vcoins')
+@Controller('meowcoins')
 @UseGuards(JwtAuthGuard)
-export class VcoinsController {
+export class MeowcoinsController {
   constructor(private readonly topup: TopupService) {}
 
   @Get('me')
   me(@CurrentUser() user: JwtPayload) {
-    return this.topup.vcoinBalance(user);
+    return this.topup.meowcoinBalance(user);
   }
 }
 

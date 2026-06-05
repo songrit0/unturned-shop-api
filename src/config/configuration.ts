@@ -15,11 +15,11 @@ export interface AppConfig {
   /** Commission taken when a player sells to the shop. Mirror SellVault's BaseCommissionPercent. */
   shop: { sellCommissionPercent: number };
   /**
-   * Real-money top-up settings. The Vcoin wallet + top-up records live in a SEPARATE
+   * Real-money top-up settings. The Meowcoin wallet + top-up records live in a SEPARATE
    * Pi5-local MariaDB (topupDb), never the external shop DB.
    */
   topup: {
-    vcoinPerBaht: number;
+    meowcoinPerBaht: number;
     minBaht: number;
     maxBaht: number;
     pollCron: string;
@@ -92,7 +92,8 @@ export default (): AppConfig => ({
     sellCommissionPercent: parseFloat(process.env.SELL_COMMISSION || '40'),
   },
   topup: {
-    vcoinPerBaht: parseFloat(process.env.VCOIN_PER_BAHT || '1'),
+    // Backward-compat: prefer MEOWCOIN_PER_BAHT, fall back to the legacy VCOIN_PER_BAHT.
+    meowcoinPerBaht: parseFloat(process.env.MEOWCOIN_PER_BAHT ?? process.env.VCOIN_PER_BAHT ?? '1'),
     minBaht: parseInt(process.env.TOPUP_MIN_BAHT || '1', 10),
     maxBaht: parseInt(process.env.TOPUP_MAX_BAHT || '10000', 10),
     // Poller fires every 15s; batch-cap keeps us well under PlernPay's 30 req/min.

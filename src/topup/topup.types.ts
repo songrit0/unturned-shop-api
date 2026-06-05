@@ -16,7 +16,7 @@ export interface TopupRow {
   discord_id: string | null;
   baht: string;
   unique_amount: string;
-  vcoins: string;
+  meowcoins: string;
   qr_code: string | null;
   promptpay_id: string | null;
   status: TopupStatus;
@@ -36,7 +36,7 @@ export interface TopupCreateView {
   qr_code: string;
   promptpay_id: string;
   expires_at: string | null;
-  vcoins: number;
+  meowcoins: number;
   status: TopupStatus;
 }
 
@@ -48,7 +48,7 @@ export interface ThunderCreateView {
   promptpay_id: string;
   receiver_name: string | null;
   amount: number;
-  vcoins: number;
+  meowcoins: number;
   expires_at: string | null;
   status: TopupStatus;
 }
@@ -57,7 +57,7 @@ export interface ThunderCreateView {
 export interface ThunderVerifyView {
   ref: string;
   status: 'credited';
-  vcoins: number;
+  meowcoins: number;
   balance: number;
 }
 
@@ -74,13 +74,13 @@ export interface TopupStatusView {
   ref: string;
   status: TopupStatus;
   unique_amount: number;
-  vcoins: number;
+  meowcoins: number;
   expires_at: string | null;
   credited_at: string | null;
 }
 
-/** Response of GET /vcoins/me. */
-export interface VcoinBalanceView {
+/** Response of GET /meowcoins/me. */
+export interface MeowcoinBalanceView {
   steam_id: string;
   balance: number;
 }

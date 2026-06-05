@@ -24,7 +24,7 @@ import {
   TopupProvider,
   TopupRow,
   TopupStatusView,
-  VcoinBalanceView,
+  MeowcoinBalanceView,
 } from './topup.types';
 
 const ALLOWED_PROVIDERS: TopupProvider[] = ['plernpay', 'thunder'];
@@ -44,8 +44,8 @@ export class TopupService {
 
   private linksTbl() { return this.shopDb.table('sv', 'links'); }
 
-  private vcoinPerBaht(): number {
-    const v = Number(this.cfg.get<number>('topup.vcoinPerBaht') ?? 1);
+  private meowcoinPerBaht(): number {
+    const v = Number(this.cfg.get<number>('topup.meowcoinPerBaht') ?? 1);
     return Number.isFinite(v) && v > 0 ? v : 1;
   }
   private minBaht(): number {
@@ -66,7 +66,7 @@ export class TopupService {
     const providers = await this.enabledProviders();
     return {
       admin_only: this.adminOnly(),
-      vcoin_per_baht: this.vcoinPerBaht(),
+      meowcoin_per_baht: this.meowcoinPerBaht(),
       min_baht: this.minBaht(),
       max_baht: this.maxBaht(),
       providers: providers.map((p) => ({ key: p.key, label: p.label })),
@@ -137,11 +137,11 @@ export class TopupService {
     }
 
     const { steamId, discordId } = await this.resolveIdentity(user);
-    const vcoins = Math.round(baht * this.vcoinPerBaht());
+    const meowcoins = Math.round(baht * this.meowcoinPerBaht());
 
     return provider === 'thunder'
-      ? this.createThunder(steamId, discordId, baht, vcoins)
-      : this.createPlernpay(steamId, discordId, baht, vcoins);
+      ? this.createThunder(steamId, discordId, baht, meowcoins)
+      : this.createPlernpay(steamId, discordId, baht, meowcoins);
   }
 
   /** PlernPay auto-PromptPay gateway charge (unchanged flow; poller confirms). */
@@ -149,7 +149,7 @@ export class TopupService {
     steamId: string,
     discordId: string | null,
     baht: number,
-    vcoins: number,
+    meowcoins: number,
   ): Promise<TopupCreateView> {
     // Create the gateway charge first; memo carries lightweight reconciliation info.
     const created = await this.plernpay.createTopup(baht, `topup steam:${steamId}`);
@@ -157,10 +157,10 @@ export class TopupService {
     // Persist the pending top-up in the Pi5-local DB ONLY.
     await this.topupDb.query(
       `INSERT INTO topups
-         (ref, steam_id, discord_id, baht, unique_amount, vcoins, qr_code, promptpay_id, status, provider, expires_at)
+         (ref, steam_id, discord_id, baht, unique_amount, meowcoins, qr_code, promptpay_id, status, provider, expires_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', 'plernpay', ?)`,
       [
-        created.ref, steamId, discordId, baht, created.unique_amount, vcoins,
+        created.ref, steamId, discordId, baht, created.unique_amount, meowcoins,
         created.qr_code, created.promptpay_id, this.toMysqlDate(created.expires_at),
       ],
     );
@@ -172,7 +172,7 @@ export class TopupService {
       qr_code: created.qr_code,
       promptpay_id: created.promptpay_id,
       expires_at: created.expires_at ?? null,
-      vcoins,
+      meowcoins,
       status: 'pending',
     };
   }
@@ -186,7 +186,7 @@ export class TopupService {
     steamId: string,
     discordId: string | null,
     baht: number,
-    vcoins: number,
+    meowcoins: number,
   ): Promise<ThunderCreateView> {
     const promptpayId = this.cfg.get<string>('thunder.promptpayId') || '';
     if (!promptpayId) throw new BadRequestException('thunder_not_configured');
@@ -198,9 +198,9 @@ export class TopupService {
 
     await this.topupDb.query(
       `INSERT INTO topups
-         (ref, steam_id, discord_id, baht, unique_amount, vcoins, qr_code, promptpay_id, status, provider)
+         (ref, steam_id, discord_id, baht, unique_amount, meowcoins, qr_code, promptpay_id, status, provider)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', 'thunder')`,
-      [ref, steamId, discordId, baht, baht, vcoins, payload, promptpayId],
+      [ref, steamId, discordId, baht, baht, meowcoins, payload, promptpayId],
     );
 
     return {
@@ -210,7 +210,7 @@ export class TopupService {
       promptpay_id: promptpayId,
       receiver_name: receiverName || null,
       amount: baht,
-      vcoins,
+      meowcoins,
       expires_at: null,
       status: 'pending',
     };
@@ -249,7 +249,7 @@ export class TopupService {
     if (!Number.isFinite(amountInSlip) || amountInSlip <= 0) {
       throw new BadRequestException('amount_mismatch');
     }
-    const creditVcoins = Math.round(amountInSlip * this.vcoinPerBaht());
+    const creditMeowcoins = Math.round(amountInSlip * this.meowcoinPerBaht());
 
     const conn = await this.topupDb.getConnection();
     try {
@@ -259,9 +259,9 @@ export class TopupService {
       try {
         const [upd] = await conn.query<mysql.ResultSetHeader>(
           `UPDATE topups
-              SET trans_ref = ?, status='credited', credited_at=NOW(), confirmed_at=NOW(), vcoins = ?
+              SET trans_ref = ?, status='credited', credited_at=NOW(), confirmed_at=NOW(), meowcoins = ?
             WHERE ref = ? AND status='pending'`,
-          [transRef, creditVcoins, ref],
+          [transRef, creditMeowcoins, ref],
         );
         if (upd.affectedRows !== 1) {
           await conn.rollback();
@@ -274,23 +274,23 @@ export class TopupService {
       }
 
       await conn.query(
-        `INSERT INTO v_coins (steam_id, balance) VALUES (?, ?)
+        `INSERT INTO meow_coins (steam_id, balance) VALUES (?, ?)
          ON DUPLICATE KEY UPDATE balance = balance + VALUES(balance)`,
-        [steamId, creditVcoins],
+        [steamId, creditMeowcoins],
       );
       await conn.query(
-        `INSERT INTO v_coin_log (steam_id, delta, reason, ref) VALUES (?, ?, 'topup_thunder', ?)`,
-        [steamId, creditVcoins, transRef],
+        `INSERT INTO meow_coin_log (steam_id, delta, reason, ref) VALUES (?, ?, 'topup_thunder', ?)`,
+        [steamId, creditMeowcoins, transRef],
       );
 
       const [balRows] = await conn.query<mysql.RowDataPacket[]>(
-        `SELECT balance FROM v_coins WHERE steam_id = ?`, [steamId],
+        `SELECT balance FROM meow_coins WHERE steam_id = ?`, [steamId],
       );
       await conn.commit();
 
-      const balance = balRows[0] ? Number((balRows[0] as any).balance) : creditVcoins;
-      this.log.log(`Thunder credited: ref=${ref} steam=${steamId} transRef=${transRef} +${creditVcoins} vcoins`);
-      return { ref, status: 'credited', vcoins: creditVcoins, balance };
+      const balance = balRows[0] ? Number((balRows[0] as any).balance) : creditMeowcoins;
+      this.log.log(`Thunder credited: ref=${ref} steam=${steamId} transRef=${transRef} +${creditMeowcoins} meowcoins`);
+      return { ref, status: 'credited', meowcoins: creditMeowcoins, balance };
     } catch (e) {
       try { await conn.rollback(); } catch { /* ignore */ }
       throw e;
@@ -328,11 +328,11 @@ export class TopupService {
     };
   }
 
-  /** GET /vcoins/me — current Vcoin balance (0 if no wallet row yet). */
-  async vcoinBalance(user: JwtPayload): Promise<VcoinBalanceView> {
+  /** GET /meowcoins/me — current Meowcoin balance (0 if no wallet row yet). */
+  async meowcoinBalance(user: JwtPayload): Promise<MeowcoinBalanceView> {
     const { steamId } = await this.resolveIdentity(user);
     const row = await this.topupDb.first<{ balance: string }>(
-      `SELECT balance FROM v_coins WHERE steam_id = ?`, [steamId],
+      `SELECT balance FROM meow_coins WHERE steam_id = ?`, [steamId],
     );
     return { steam_id: steamId, balance: row ? Number(row.balance) : 0 };
   }
@@ -385,13 +385,13 @@ export class TopupService {
         return false;
       }
       await conn.query(
-        `INSERT INTO v_coins (steam_id, balance) VALUES (?, ?)
+        `INSERT INTO meow_coins (steam_id, balance) VALUES (?, ?)
          ON DUPLICATE KEY UPDATE balance = balance + VALUES(balance)`,
-        [row.steam_id, row.vcoins],
+        [row.steam_id, row.meowcoins],
       );
       await conn.query(
-        `INSERT INTO v_coin_log (steam_id, delta, reason, ref) VALUES (?, ?, 'topup', ?)`,
-        [row.steam_id, row.vcoins, row.ref],
+        `INSERT INTO meow_coin_log (steam_id, delta, reason, ref) VALUES (?, ?, 'topup', ?)`,
+        [row.steam_id, row.meowcoins, row.ref],
       );
       await conn.commit();
       return true;
@@ -418,7 +418,7 @@ export class TopupService {
       ref: r.ref,
       status: r.status,
       unique_amount: Number(r.unique_amount),
-      vcoins: Number(r.vcoins),
+      meowcoins: Number(r.meowcoins),
       expires_at: r.expires_at,
       credited_at: r.credited_at,
     };

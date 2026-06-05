@@ -75,7 +75,7 @@ export class TopupPollService implements OnModuleInit {
             const didCredit = await this.topup.confirmAndCredit(row);
             if (didCredit) {
               credited += 1;
-              this.log.log(`Top-up credited: ref=${row.ref} steam=${row.steam_id} +${row.vcoins} vcoins`);
+              this.log.log(`Top-up credited: ref=${row.ref} steam=${row.steam_id} +${row.meowcoins} meowcoins`);
             }
           } else if (res.status === 'expired' || res.status === 'cancelled') {
             await this.topup.markExpired(row.ref);

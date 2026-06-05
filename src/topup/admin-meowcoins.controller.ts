@@ -4,15 +4,15 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { AdminGuard } from '../common/guards/admin.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtPayload } from '../auth/strategies/jwt.strategy';
-import { AdminVcoinsService } from './admin-vcoins.service';
+import { AdminMeowcoinsService } from './admin-meowcoins.service';
 
-class AdjustVcoinsDto {
+class AdjustMeowcoinsDto {
   @IsString() steam_id!: string;
   @IsInt() delta!: number;
   @IsOptional() @IsString() @MaxLength(80) reason?: string;
 }
 
-class SetVcoinsDto {
+class SetMeowcoinsDto {
   @IsString() steam_id!: string;
   @IsInt() balance!: number;
   @IsOptional() @IsString() @MaxLength(80) reason?: string;
@@ -28,10 +28,10 @@ function actorOf(admin: JwtPayload): string {
   return (admin.steam_id ?? admin.sub ?? 'admin').toString().slice(0, 64);
 }
 
-@Controller('admin/vcoins')
+@Controller('admin/meowcoins')
 @UseGuards(JwtAuthGuard, AdminGuard)
-export class AdminVcoinsController {
-  constructor(private readonly svc: AdminVcoinsService) {}
+export class AdminMeowcoinsController {
+  constructor(private readonly svc: AdminMeowcoinsService) {}
 
   @Get('topups')
   topups(
@@ -54,12 +54,12 @@ export class AdminVcoinsController {
   }
 
   @Post('adjust')
-  adjust(@CurrentUser() admin: JwtPayload, @Body() body: AdjustVcoinsDto) {
+  adjust(@CurrentUser() admin: JwtPayload, @Body() body: AdjustMeowcoinsDto) {
     return this.svc.adjust(body.steam_id, body.delta, actorOf(admin), body.reason);
   }
 
   @Post('set')
-  set(@CurrentUser() admin: JwtPayload, @Body() body: SetVcoinsDto) {
+  set(@CurrentUser() admin: JwtPayload, @Body() body: SetMeowcoinsDto) {
     return this.svc.set(body.steam_id, body.balance, actorOf(admin), body.reason);
   }
 

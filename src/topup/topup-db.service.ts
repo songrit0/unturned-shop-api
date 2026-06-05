@@ -4,7 +4,7 @@ import * as mysql from 'mysql2/promise';
 
 /**
  * SECOND, Pi5-local MariaDB pool — completely separate from the external shop DB (DbService).
- * Owns the Vcoin wallet + real-money top-up records. NOTHING in here ever touches the shop DB.
+ * Owns the Meowcoin wallet + real-money top-up records. NOTHING in here ever touches the shop DB.
  *
  * On boot it creates its schema idempotently (CREATE TABLE IF NOT EXISTS).
  */
@@ -43,8 +43,16 @@ export class TopupDbService implements OnModuleInit, OnModuleDestroy {
 
   private async ensureSchema() {
     try {
+      // Vcoin -> Meowcoin rename migration. These run FIRST (before the CREATE IF NOT EXISTS
+      // below) so existing installs keep their data: the tables/column are renamed in place,
+      // then the CREATE statements become a no-op. Fresh installs skip the renames (old names
+      // absent) and get the new names straight from CREATE. Guarded + idempotent.
+      await this.ensureRenameTable('v_coins', 'meow_coins');
+      await this.ensureRenameTable('v_coin_log', 'meow_coin_log');
+      await this.ensureRenameColumn('topups', 'vcoins', 'meowcoins', 'BIGINT NOT NULL');
+
       await this.query(
-        `CREATE TABLE IF NOT EXISTS v_coins (
+        `CREATE TABLE IF NOT EXISTS meow_coins (
           steam_id BIGINT UNSIGNED PRIMARY KEY,
           balance BIGINT NOT NULL DEFAULT 0,
           updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
@@ -58,7 +66,7 @@ export class TopupDbService implements OnModuleInit, OnModuleDestroy {
           discord_id BIGINT UNSIGNED NULL,
           baht DECIMAL(10,2) NOT NULL,
           unique_amount DECIMAL(10,2) NOT NULL,
-          vcoins BIGINT NOT NULL,
+          meowcoins BIGINT NOT NULL,
           qr_code TEXT NULL,
           promptpay_id VARCHAR(32) NULL,
           status ENUM('pending','confirmed','credited','expired','cancelled','failed') NOT NULL DEFAULT 'pending',
@@ -73,7 +81,7 @@ export class TopupDbService implements OnModuleInit, OnModuleDestroy {
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
       );
       await this.query(
-        `CREATE TABLE IF NOT EXISTS v_coin_log (
+        `CREATE TABLE IF NOT EXISTS meow_coin_log (
           id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
           steam_id BIGINT UNSIGNED NOT NULL,
           delta BIGINT NOT NULL,
@@ -84,8 +92,8 @@ export class TopupDbService implements OnModuleInit, OnModuleDestroy {
           INDEX idx_steam (steam_id)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
       );
-      // Idempotent migration: v_coin_log.actor (who performed an admin adjustment).
-      await this.ensureColumn('v_coin_log', 'actor', `ADD COLUMN \`actor\` VARCHAR(64) NULL`);
+      // Idempotent migration: meow_coin_log.actor (who performed an admin adjustment).
+      await this.ensureColumn('meow_coin_log', 'actor', `ADD COLUMN \`actor\` VARCHAR(64) NULL`);
 
       // Multi-provider migration: which gateway minted the row + the verified bank transRef.
       await this.ensureColumn('topups', 'provider', `ADD COLUMN \`provider\` VARCHAR(16) NOT NULL DEFAULT 'plernpay'`);
@@ -104,7 +112,7 @@ export class TopupDbService implements OnModuleInit, OnModuleDestroy {
       );
       await this.seedProviders();
 
-      this.log.log('Top-up schema ready (v_coins / topups / v_coin_log / topup_providers)');
+      this.log.log('Top-up schema ready (meow_coins / topups / meow_coin_log / topup_providers)');
     } catch (e: any) {
       this.log.error(`Top-up schema ensure failed: ${e.message}`);
     }
@@ -157,6 +165,58 @@ export class TopupDbService implements OnModuleInit, OnModuleDestroy {
       this.log.log(`Top-up migration: added ${table}.${column}`);
     } catch (e: any) {
       this.log.warn(`Top-up migration ${table}.${column} failed: ${e.message}`);
+    }
+  }
+
+  /**
+   * Rename a table only when the OLD name exists AND the NEW name does not yet exist in this
+   * schema (information_schema-guarded, idempotent). Safe to run on every boot.
+   */
+  private async ensureRenameTable(oldName: string, newName: string) {
+    const dbName = this.cfg.get<string>('topupDb.database');
+    try {
+      const oldExists = await this.first<{ c: number }>(
+        `SELECT COUNT(*) AS c FROM information_schema.TABLES
+         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?`,
+        [dbName, oldName],
+      );
+      const newExists = await this.first<{ c: number }>(
+        `SELECT COUNT(*) AS c FROM information_schema.TABLES
+         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?`,
+        [dbName, newName],
+      );
+      if (!oldExists || Number(oldExists.c) === 0) return; // nothing to rename
+      if (newExists && Number(newExists.c) > 0) return;     // already migrated
+      await this.query(`RENAME TABLE \`${oldName}\` TO \`${newName}\``);
+      this.log.log(`Top-up migration: renamed table ${oldName} -> ${newName}`);
+    } catch (e: any) {
+      this.log.warn(`Top-up migration rename table ${oldName} -> ${newName} failed: ${e.message}`);
+    }
+  }
+
+  /**
+   * Rename a column only when the OLD column exists AND the NEW column does not yet exist on the
+   * table (information_schema-guarded, idempotent). colDef must restate the full column type.
+   */
+  private async ensureRenameColumn(table: string, oldCol: string, newCol: string, colDef: string) {
+    const dbName = this.cfg.get<string>('topupDb.database');
+    try {
+      const oldExists = await this.first<{ c: number }>(
+        `SELECT COUNT(*) AS c FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
+        [dbName, table, oldCol],
+      );
+      const newExists = await this.first<{ c: number }>(
+        `SELECT COUNT(*) AS c FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
+        [dbName, table, newCol],
+      );
+      if (!oldExists || Number(oldExists.c) === 0) return; // nothing to rename
+      if (newExists && Number(newExists.c) > 0) return;     // already migrated
+      await this.query(`ALTER TABLE \`${table}\` CHANGE \`${oldCol}\` \`${newCol}\` ${colDef}`);
+      this.log.log(`Top-up migration: renamed column ${table}.${oldCol} -> ${table}.${newCol}`);
+    } catch (e: any) {
+      this.log.warn(`Top-up migration rename column ${table}.${oldCol} -> ${newCol} failed: ${e.message}`);
     }
   }
 

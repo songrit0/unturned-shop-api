@@ -11,14 +11,14 @@ export interface AdminTopupRow {
   discord_name: string | null;
   baht: string;
   unique_amount: string;
-  vcoins: string;
+  meowcoins: string;
   status: string;
   created_at: string;
   confirmed_at: string | null;
   credited_at: string | null;
 }
 
-export interface VcoinLogEntry {
+export interface MeowcoinLogEntry {
   delta: number;
   reason: string;
   ref: string | null;
@@ -30,7 +30,7 @@ export interface AdminWalletView {
   steam_id: string;
   discord_name: string | null;
   balance: number;
-  log: VcoinLogEntry[];
+  log: MeowcoinLogEntry[];
 }
 
 export interface ProviderView {
@@ -41,7 +41,7 @@ export interface ProviderView {
 }
 
 @Injectable()
-export class AdminVcoinsService {
+export class AdminMeowcoinsService {
   constructor(
     /** Pi5-local top-up DB — owns the wallet, log and top-up records. */
     private readonly topupDb: TopupDbService,
@@ -75,7 +75,7 @@ export class AdminVcoinsService {
     return m.get(steamId) ?? null;
   }
 
-  /** GET /admin/vcoins/topups — all top-ups, newest first, with optional status + q filters. */
+  /** GET /admin/meowcoins/topups — all top-ups, newest first, with optional status + q filters. */
   async listTopups(
     status?: string,
     q?: string,
@@ -124,7 +124,7 @@ export class AdminVcoinsService {
     const total = cnt ? Number(cnt.c) : 0;
 
     const rows = await this.topupDb.query<Omit<AdminTopupRow, 'discord_name'> & { discord_id: string | null }>(
-      `SELECT id, ref, steam_id, discord_id, baht, unique_amount, vcoins, status,
+      `SELECT id, ref, steam_id, discord_id, baht, unique_amount, meowcoins, status,
               created_at, confirmed_at, credited_at
        FROM topups ${whereSql}
        ORDER BY id DESC
@@ -140,7 +140,7 @@ export class AdminVcoinsService {
       discord_name: names.get(String(r.steam_id)) ?? null,
       baht: r.baht,
       unique_amount: r.unique_amount,
-      vcoins: r.vcoins,
+      meowcoins: r.meowcoins,
       status: r.status,
       created_at: r.created_at,
       confirmed_at: r.confirmed_at,
@@ -150,14 +150,14 @@ export class AdminVcoinsService {
     return { items, total, page: np.page, limit: np.limit, pages: Math.ceil(total / np.limit) };
   }
 
-  /** GET /admin/vcoins/wallet/:steamId — balance + latest ~50 log rows. */
+  /** GET /admin/meowcoins/wallet/:steamId — balance + latest ~50 log rows. */
   async getWallet(steamId: string): Promise<AdminWalletView> {
     const balRow = await this.topupDb.first<{ balance: string }>(
-      `SELECT balance FROM v_coins WHERE steam_id = ?`, [steamId],
+      `SELECT balance FROM meow_coins WHERE steam_id = ?`, [steamId],
     );
-    const log = await this.topupDb.query<VcoinLogEntry>(
+    const log = await this.topupDb.query<MeowcoinLogEntry>(
       `SELECT delta, reason, ref, actor, at
-       FROM v_coin_log WHERE steam_id = ?
+       FROM meow_coin_log WHERE steam_id = ?
        ORDER BY id DESC LIMIT 50`,
       [steamId],
     );
@@ -170,7 +170,7 @@ export class AdminVcoinsService {
   }
 
   /**
-   * POST /admin/vcoins/adjust — balance += delta (may go negative; NO floor).
+   * POST /admin/meowcoins/adjust — balance += delta (may go negative; NO floor).
    * One Pi5 transaction; logs the delta with the admin's actor id.
    */
   async adjust(
@@ -187,17 +187,17 @@ export class AdminVcoinsService {
     try {
       await conn.beginTransaction();
       await conn.query(
-        `INSERT INTO v_coins (steam_id, balance) VALUES (?, ?)
+        `INSERT INTO meow_coins (steam_id, balance) VALUES (?, ?)
          ON DUPLICATE KEY UPDATE balance = balance + VALUES(balance)`,
         [steamId, d],
       );
       await conn.query(
-        `INSERT INTO v_coin_log (steam_id, delta, reason, ref, actor)
+        `INSERT INTO meow_coin_log (steam_id, delta, reason, ref, actor)
          VALUES (?, ?, COALESCE(?, 'admin_adjust'), NULL, ?)`,
         [steamId, d, reason?.trim() || null, actor],
       );
       const [rows] = await conn.query<mysql.RowDataPacket[]>(
-        `SELECT balance FROM v_coins WHERE steam_id = ?`, [steamId],
+        `SELECT balance FROM meow_coins WHERE steam_id = ?`, [steamId],
       );
       await conn.commit();
       const balance = rows[0] ? Number((rows[0] as any).balance) : d;
@@ -211,7 +211,7 @@ export class AdminVcoinsService {
   }
 
   /**
-   * POST /admin/vcoins/set — set the absolute balance, logging the (new - old) delta.
+   * POST /admin/meowcoins/set — set the absolute balance, logging the (new - old) delta.
    * One Pi5 transaction; logs with the admin's actor id.
    */
   async set(
@@ -229,20 +229,20 @@ export class AdminVcoinsService {
       await conn.beginTransaction();
       // Lock (or create) the row, then compute the delta we are about to apply.
       await conn.query(
-        `INSERT INTO v_coins (steam_id, balance) VALUES (?, 0)
+        `INSERT INTO meow_coins (steam_id, balance) VALUES (?, 0)
          ON DUPLICATE KEY UPDATE balance = balance`,
         [steamId],
       );
       const [cur] = await conn.query<mysql.RowDataPacket[]>(
-        `SELECT balance FROM v_coins WHERE steam_id = ? FOR UPDATE`, [steamId],
+        `SELECT balance FROM meow_coins WHERE steam_id = ? FOR UPDATE`, [steamId],
       );
       const old = cur[0] ? Number((cur[0] as any).balance) : 0;
       const delta = target - old;
 
-      await conn.query(`UPDATE v_coins SET balance = ? WHERE steam_id = ?`, [target, steamId]);
+      await conn.query(`UPDATE meow_coins SET balance = ? WHERE steam_id = ?`, [target, steamId]);
       if (delta !== 0) {
         await conn.query(
-          `INSERT INTO v_coin_log (steam_id, delta, reason, ref, actor)
+          `INSERT INTO meow_coin_log (steam_id, delta, reason, ref, actor)
            VALUES (?, ?, COALESCE(?, 'admin_set'), NULL, ?)`,
           [steamId, delta, reason?.trim() || null, actor],
         );
@@ -259,7 +259,7 @@ export class AdminVcoinsService {
 
   // ---- Provider registry (admin on/off) ------------------------------------
 
-  /** GET /admin/vcoins/providers — all providers (enabled + disabled), by sort. */
+  /** GET /admin/meowcoins/providers — all providers (enabled + disabled), by sort. */
   async listProviders(): Promise<ProviderView[]> {
     const rows = await this.topupDb.query<{ key: string; label: string | null; enabled: number; sort: number }>(
       `SELECT \`key\`, label, enabled, sort FROM topup_providers ORDER BY sort ASC, \`key\` ASC`,
@@ -269,7 +269,7 @@ export class AdminVcoinsService {
     }));
   }
 
-  /** POST /admin/vcoins/providers — toggle enabled. Rejects an unknown key. */
+  /** POST /admin/meowcoins/providers — toggle enabled. Rejects an unknown key. */
   async setProvider(key: string, enabled: boolean): Promise<ProviderView> {
     const exists = await this.topupDb.first<{ key: string }>(
       `SELECT \`key\` FROM topup_providers WHERE \`key\` = ?`, [key],
