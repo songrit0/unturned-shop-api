@@ -56,9 +56,61 @@ export class TopupService {
     const v = Number(this.cfg.get<number>('topup.maxBaht') ?? 10000);
     return Number.isFinite(v) && v >= 1 ? Math.floor(v) : 10000;
   }
-  /** Soft-launch gate: top-up restricted to admins until TOPUP_ADMIN_ONLY=false. */
+  /** Admin gate: donations are open to all unless TOPUP_ADMIN_ONLY=true (default false). */
   private adminOnly(): boolean {
-    return this.cfg.get<boolean>('topup.adminOnly') !== false;
+    return this.cfg.get<boolean>('topup.adminOnly') === true;
+  }
+  /** Donate: per-user cap (baht) per calendar month. */
+  monthlyCapBaht(): number {
+    const v = Number(this.cfg.get<number>('topup.monthlyCapBaht') ?? 150);
+    return Number.isFinite(v) && v >= 0 ? Math.floor(v) : 150;
+  }
+  /** Donate: community-wide monthly goal (baht). */
+  monthlyGoalBaht(): number {
+    const v = Number(this.cfg.get<number>('topup.monthlyGoalBaht') ?? 1200);
+    return Number.isFinite(v) && v >= 0 ? Math.floor(v) : 1200;
+  }
+
+  /**
+   * Calendar-month bounds in the SERVER'S LOCAL time zone, matching how the topup tables store
+   * credited_at (NOW()/CURRENT_TIMESTAMP are local; mysql2 reads back as local). Returns MySQL
+   * DATETIME strings [monthStart, nextMonthStart) plus the 'YYYY-MM' period key. A row is "this
+   * month" when monthStart <= credited_at < nextMonthStart.
+   */
+  monthBounds(now: Date = new Date()): { period: string; monthStart: string; nextMonthStart: string } {
+    const y = now.getFullYear();
+    const m = now.getMonth(); // 0-based
+    const start = new Date(y, m, 1, 0, 0, 0, 0);
+    const next = new Date(y, m + 1, 1, 0, 0, 0, 0);
+    const fmt = (d: Date) => {
+      const p = (n: number) => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} `
+        + `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+    };
+    const p = (n: number) => String(n).padStart(2, '0');
+    return { period: `${y}-${p(m + 1)}`, monthStart: fmt(start), nextMonthStart: fmt(next) };
+  }
+
+  /** Sum of a user's CREDITED donations (baht) this calendar month. Counts credited only. */
+  async userDonatedThisMonth(steamId: string): Promise<number> {
+    const { monthStart, nextMonthStart } = this.monthBounds();
+    const row = await this.topupDb.first<{ total: string | number | null }>(
+      `SELECT COALESCE(SUM(baht),0) AS total FROM topups
+        WHERE steam_id = ? AND status = 'credited' AND credited_at >= ? AND credited_at < ?`,
+      [steamId, monthStart, nextMonthStart],
+    );
+    return row ? Number(row.total) : 0;
+  }
+
+  /** Sum of ALL credited donations (baht) this calendar month (community total). */
+  async communityTotalThisMonth(): Promise<number> {
+    const { monthStart, nextMonthStart } = this.monthBounds();
+    const row = await this.topupDb.first<{ total: string | number | null }>(
+      `SELECT COALESCE(SUM(baht),0) AS total FROM topups
+        WHERE status = 'credited' AND credited_at >= ? AND credited_at < ?`,
+      [monthStart, nextMonthStart],
+    );
+    return row ? Number(row.total) : 0;
   }
 
   /** Public (no-auth) top-up config for the web to gate its UI + show the rate/limits + providers. */
@@ -69,6 +121,8 @@ export class TopupService {
       meowcoin_per_baht: this.meowcoinPerBaht(),
       min_baht: this.minBaht(),
       max_baht: this.maxBaht(),
+      monthly_cap_baht: this.monthlyCapBaht(),
+      monthly_goal_baht: this.monthlyGoalBaht(),
       providers: providers.map((p) => ({ key: p.key, label: p.label })),
     };
   }
@@ -115,7 +169,7 @@ export class TopupService {
     baht: number,
     provider: TopupProvider = 'plernpay',
   ): Promise<TopupCreateView | ThunderCreateView> {
-    // Soft launch: only admins may top up until TOPUP_ADMIN_ONLY is flipped to false.
+    // Donations open to all by default; re-gate to admins only with TOPUP_ADMIN_ONLY=true.
     if (this.adminOnly() && !user.is_admin) {
       throw new ForbiddenException('topup_admin_only');
     }
@@ -137,6 +191,17 @@ export class TopupService {
     }
 
     const { steamId, discordId } = await this.resolveIdentity(user);
+
+    // Donate monthly cap: a user's CREDITED donations this calendar month + this new amount must
+    // not exceed the configured cap. Counts credited only (pending rows don't consume the cap).
+    const cap = this.monthlyCapBaht();
+    if (cap > 0) {
+      const donated = await this.userDonatedThisMonth(steamId);
+      if (donated + baht > cap) {
+        throw new ForbiddenException('donate_cap_exceeded');
+      }
+    }
+
     const meowcoins = Math.round(baht * this.meowcoinPerBaht());
 
     return provider === 'thunder'

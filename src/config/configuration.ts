@@ -25,8 +25,12 @@ export interface AppConfig {
     pollCron: string;
     /** Max pending rows polled per tick — keeps us well under PlernPay's 30 req/min. */
     pollBatch: number;
-    /** Soft-launch gate: when true only admins can create a top-up. Flip TOPUP_ADMIN_ONLY=false to open to all. */
+    /** Soft-launch gate: when true only admins can create a top-up. Default false (donations open to all). */
     adminOnly: boolean;
+    /** Donate: max baht a single user may donate per calendar month (resets monthly). */
+    monthlyCapBaht: number;
+    /** Donate: community-wide monthly goal (baht) the progress bar fills toward (resets monthly). */
+    monthlyGoalBaht: number;
   };
   topupDb: { host: string; port: number; user: string; password: string; database: string };
   /** PlernPay PromptPay top-up gateway credentials (server-only secret). */
@@ -99,8 +103,11 @@ export default (): AppConfig => ({
     // Poller fires every 15s; batch-cap keeps us well under PlernPay's 30 req/min.
     pollCron: process.env.TOPUP_POLL_CRON || '*/15 * * * * *',
     pollBatch: parseInt(process.env.TOPUP_POLL_BATCH || '5', 10),
-    // Default admin-only (soft launch). Set TOPUP_ADMIN_ONLY=false to open to all players.
-    adminOnly: process.env.TOPUP_ADMIN_ONLY !== 'false',
+    // Donations are OPEN to all by default. Set TOPUP_ADMIN_ONLY=true to re-gate to admins only.
+    adminOnly: process.env.TOPUP_ADMIN_ONLY === 'true',
+    // Donate: per-user monthly cap (baht) and community monthly goal (baht). Both reset each calendar month.
+    monthlyCapBaht: parseInt(process.env.TOPUP_MONTHLY_CAP_BAHT || '150', 10),
+    monthlyGoalBaht: parseInt(process.env.TOPUP_MONTHLY_GOAL_BAHT || '1200', 10),
   },
   topupDb: {
     host: process.env.TOPUP_DB_HOST || '127.0.0.1',

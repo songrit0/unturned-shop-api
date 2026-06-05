@@ -112,7 +112,48 @@ export class TopupDbService implements OnModuleInit, OnModuleDestroy {
       );
       await this.seedProviders();
 
-      this.log.log('Top-up schema ready (meow_coins / topups / meow_coin_log / topup_providers)');
+      // ---- Donate / Battlepass tables (Pi5-local, API-owned) ----
+      // Seasonal donation tiers (battlepass): a cumulative monthly donation total unlocks a tier;
+      // its reward item-set is delivered as a redeem code the user claims manually. Tiers + claims
+      // reset each calendar month (the period column scopes claims).
+      await this.query(
+        `CREATE TABLE IF NOT EXISTS donation_tiers (
+          id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+          threshold_baht INT NOT NULL,
+          name VARCHAR(64) NOT NULL,
+          enabled TINYINT(1) NOT NULL DEFAULT 1,
+          sort INT NOT NULL DEFAULT 0,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+      );
+      await this.query(
+        `CREATE TABLE IF NOT EXISTS donation_tier_rewards (
+          id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+          tier_id BIGINT UNSIGNED NOT NULL,
+          kind TINYINT NOT NULL DEFAULT 0,
+          item_id INT NOT NULL,
+          amount INT NOT NULL DEFAULT 1,
+          quality INT NOT NULL DEFAULT 100,
+          PRIMARY KEY (id),
+          INDEX idx_tier (tier_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+      );
+      await this.query(
+        `CREATE TABLE IF NOT EXISTS donation_claims (
+          id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+          steam_id BIGINT UNSIGNED NOT NULL,
+          tier_id BIGINT UNSIGNED NOT NULL,
+          period CHAR(7) NOT NULL,
+          code VARCHAR(64) NULL,
+          claimed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (id),
+          UNIQUE KEY uq_claim (steam_id, tier_id, period),
+          INDEX idx_steam (steam_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+      );
+
+      this.log.log('Top-up schema ready (meow_coins / topups / meow_coin_log / topup_providers / donation_tiers / donation_tier_rewards / donation_claims)');
     } catch (e: any) {
       this.log.error(`Top-up schema ensure failed: ${e.message}`);
     }

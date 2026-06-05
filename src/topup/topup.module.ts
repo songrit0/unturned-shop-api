@@ -9,6 +9,10 @@ import { TopupPollService } from './topup-poll.service';
 import { AdminMeowcoinsController } from './admin-meowcoins.controller';
 import { AdminMeowcoinsService } from './admin-meowcoins.service';
 import { MeowcoinWalletService } from './meowcoin-wallet.service';
+import { DonateController } from './donate.controller';
+import { AdminDonateController } from './admin-donate.controller';
+import { DonateService } from './donate.service';
+import { PurchasesModule } from '../purchases/purchases.module';
 
 /**
  * Real-money Meowcoin top-up via PlernPay (auto) + Thunder (slip upload). Meowcoin wallet + records
@@ -16,9 +20,9 @@ import { MeowcoinWalletService } from './meowcoin-wallet.service';
  * is injected READ-ONLY in TopupService solely to resolve steam_id from sv_links.
  */
 @Module({
-  imports: [ScheduleModule.forRoot()],
-  controllers: [TopupController, MeowcoinsController, TopupConfigController, AdminMeowcoinsController],
-  providers: [TopupService, TopupDbService, PlernpayService, ThunderService, TopupPollService, AdminMeowcoinsService, MeowcoinWalletService],
+  imports: [ScheduleModule.forRoot(), PurchasesModule],
+  controllers: [TopupController, MeowcoinsController, TopupConfigController, AdminMeowcoinsController, DonateController, AdminDonateController],
+  providers: [TopupService, TopupDbService, PlernpayService, ThunderService, TopupPollService, AdminMeowcoinsService, MeowcoinWalletService, DonateService],
   exports: [TopupService, MeowcoinWalletService],
 })
 export class TopupModule {}

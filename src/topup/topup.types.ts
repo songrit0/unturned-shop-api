@@ -84,3 +84,80 @@ export interface MeowcoinBalanceView {
   steam_id: string;
   balance: number;
 }
+
+// ---- Donate / Battlepass ----
+
+/** Reward kind discriminator on donation_tier_rewards.kind (0=item, 1=vehicle). */
+export type DonateRewardKind = 'item' | 'vehicle';
+
+/** Row shape in donation_tiers (Pi5). */
+export interface DonationTierRow {
+  id: number;
+  threshold_baht: number;
+  name: string;
+  enabled: number;
+  sort: number;
+  created_at: string;
+}
+
+/** Row shape in donation_tier_rewards (Pi5). */
+export interface DonationTierRewardRow {
+  id: number;
+  tier_id: number;
+  kind: number;
+  item_id: number;
+  amount: number;
+  quality: number;
+}
+
+/** A reward in API responses, with name/image resolved from the shop DB. */
+export interface DonateRewardView {
+  kind: DonateRewardKind;
+  item_id: number;
+  amount: number;
+  quality: number;
+  name: string | null;
+  image_url: string | null;
+}
+
+/** A tier in GET /donate/progress. */
+export interface DonateTierProgressView {
+  id: number;
+  threshold_baht: number;
+  name: string;
+  sort: number;
+  rewards: DonateRewardView[];
+  unlocked: boolean;
+  claimed: boolean;
+  code: string | null;
+}
+
+/** Response of GET /donate/progress. */
+export interface DonateProgressView {
+  period: string;
+  user_donated: number;
+  user_cap: number;
+  user_remaining: number;
+  community_total: number;
+  community_goal: number;
+  tiers: DonateTierProgressView[];
+}
+
+/** Response of POST /donate/claim. */
+export interface DonateClaimView {
+  code: string;
+  code_expires_at: string | null;
+  already?: boolean;
+  rewards: DonateRewardView[];
+}
+
+/** A tier with its rewards (admin CRUD view). */
+export interface AdminDonationTierView {
+  id: number;
+  threshold_baht: number;
+  name: string;
+  enabled: number;
+  sort: number;
+  created_at: string;
+  rewards: DonateRewardView[];
+}
