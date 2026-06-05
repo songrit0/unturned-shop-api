@@ -36,6 +36,12 @@ export class AdminCoinsController {
     return this.svc.historyForUser(steamId, q.page, q.limit);
   }
 
+  /** Unified Coin transaction-history timeline for the target user (shop + p2p + admin/tax + transfers). */
+  @Get(':steamId/history/all')
+  unifiedHistory(@Param('steamId') steamId: string, @Query() q: PaginationQueryDto) {
+    return this.svc.unifiedHistoryForUser(steamId, q.page, q.limit);
+  }
+
   @Post(':steamId/adjust')
   adjust(
     @CurrentUser() admin: JwtPayload,

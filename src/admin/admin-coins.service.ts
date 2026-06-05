@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { DbService } from '../database/db.service';
 import { Paginated, normalizePage } from '../common/pagination';
+import { CoinsService, HistoryRow } from '../coins/coins.service';
 
 export interface CoinUserRow {
   steam_id: string;
@@ -11,7 +12,7 @@ export interface CoinUserRow {
 
 @Injectable()
 export class AdminCoinsService {
-  constructor(private readonly db: DbService) {}
+  constructor(private readonly db: DbService, private readonly coins: CoinsService) {}
 
   /** List all coin holders (paginated). */
   async listUsers(page?: number, limit?: number, search = ''): Promise<Paginated<CoinUserRow>> {
@@ -116,5 +117,10 @@ export class AdminCoinsService {
       [steamId, np.limit, np.offset],
     );
     return { items, total, page: np.page, limit: np.limit, pages: Math.ceil(total / np.limit) };
+  }
+
+  /** Unified Coin transaction-history timeline for a target steam_id (shop + p2p + admin/tax + transfers). */
+  async unifiedHistoryForUser(steamId: string, page?: number, limit?: number): Promise<Paginated<HistoryRow>> {
+    return this.coins.unifiedHistory(steamId, page, limit);
   }
 }

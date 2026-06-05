@@ -15,6 +15,12 @@ export interface AppConfig {
   /** Commission taken when a player sells to the shop. Mirror SellVault's BaseCommissionPercent. */
   shop: { sellCommissionPercent: number };
   /**
+   * Player-to-player Coin transfers. FLAT fee paid by the sender ON TOP of the amount
+   * (sender pays amount + fee, recipient receives the full amount, fee is a burned sink).
+   * transferMin must be > transferFee so a transfer always moves more than it burns.
+   */
+  coin: { transferFee: number; transferMin: number };
+  /**
    * Real-money top-up settings. The Meowcoin wallet + top-up records live in a SEPARATE
    * Pi5-local MariaDB (topupDb), never the external shop DB.
    */
@@ -94,6 +100,11 @@ export default (): AppConfig => ({
   shop: {
     // Default 40 mirrors SellVault.BaseCommissionPercent (player receives 60% of market price).
     sellCommissionPercent: parseFloat(process.env.SELL_COMMISSION || '40'),
+  },
+  coin: {
+    // Flat fee burned on every P2P transfer; min transfer must exceed it.
+    transferFee: parseInt(process.env.COIN_TRANSFER_FEE || '200', 10),
+    transferMin: parseInt(process.env.COIN_TRANSFER_MIN || '201', 10),
   },
   topup: {
     // Backward-compat: prefer MEOWCOIN_PER_BAHT, fall back to the legacy VCOIN_PER_BAHT.

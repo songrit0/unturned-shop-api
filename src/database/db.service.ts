@@ -93,6 +93,34 @@ export class DbService implements OnModuleInit, OnModuleDestroy {
 
     // Per-item Meowcoin pricing columns (migration 012)
     await this.ensureMeowcoinPricingColumns();
+
+    // Player-to-player Coin transfers ledger (migration 013)
+    await this.ensureCoinTransfersTable();
+  }
+
+  /**
+   * Player-to-player Coin transfers (migration 013): api-owned audit ledger of every
+   * completed transfer. NEW table only — additive + idempotent, safe on the shared shop DB.
+   */
+  private async ensureCoinTransfersTable() {
+    const transfers = this.table('sv', 'coin_transfers');
+    try {
+      await this.query(
+        `CREATE TABLE IF NOT EXISTS ${transfers} (
+          id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+          sender_steam CHAR(17) NOT NULL,
+          recipient_steam CHAR(17) NOT NULL,
+          amount BIGINT NOT NULL,
+          fee BIGINT NOT NULL DEFAULT 0,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (id),
+          INDEX idx_sender (sender_steam),
+          INDEX idx_recipient (recipient_steam)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+      );
+    } catch (e: any) {
+      this.log.warn(`coin_transfers ensure failed: ${e.message}`);
+    }
   }
 
   /**
