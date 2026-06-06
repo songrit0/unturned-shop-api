@@ -1,4 +1,4 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Controller, Get, Param, Query } from '@nestjs/common';
 import { PlayerStatsService } from './player-stats.service';
 
 @Controller('player-stats')
@@ -10,5 +10,10 @@ export class PlayerStatsController {
     const n = parseInt(limit ?? '10', 10);
     const players = await this.service.leaderboard(isNaN(n) ? 10 : n);
     return { players };
+  }
+
+  @Get(':steamId')
+  async getOne(@Param('steamId') steamId: string) {
+    return this.service.findBySteamId(steamId);
   }
 }
