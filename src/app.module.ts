@@ -29,6 +29,7 @@ import { BotModule } from './bot/bot.module';
 import { VipModule } from './vip/vip.module';
 import { TopupModule } from './topup/topup.module';
 import { PlayerStatsModule } from './player-stats/player-stats.module';
+import { PublicModule } from './public/public.module';
 import { HealthController } from './health/health.controller';
 import { VersionController } from './health/version.controller';
 
@@ -63,6 +64,7 @@ import { VersionController } from './health/version.controller';
     VipModule,
     TopupModule,
     PlayerStatsModule,
+    PublicModule,
   ],
   controllers: [HealthController, VersionController],
 })
