@@ -454,20 +454,22 @@ export class GachaService implements OnModuleInit {
        ON DUPLICATE KEY UPDATE free_used = free_used`,
       [steam, day],
     );
-    const [res]: any = await this.db.query(
+    // NOTE: db.query() returns the driver result directly (ResultSetHeader for writes), NOT a
+    // [rows, fields] tuple — do not array-destructure it.
+    const res: any = await this.db.query(
       `UPDATE ${this.stateTbl()} SET free_used = free_used + 1
        WHERE steam_id = ? AND gacha_day = ? AND free_used < ?`,
       [steam, day, entitlement],
     );
-    return res.affectedRows > 0;
+    return Number(res?.affectedRows ?? 0) > 0;
   }
 
   private async tryConsumePaid(steam: string): Promise<boolean> {
-    const [res]: any = await this.db.query(
+    const res: any = await this.db.query(
       `UPDATE ${this.walletTbl()} SET paid_spins = paid_spins - 1
        WHERE steam_id = ? AND paid_spins > 0`, [steam],
     );
-    return res.affectedRows > 0;
+    return Number(res?.affectedRows ?? 0) > 0;
   }
 
   private async refundSpin(steam: string, day: string, wasFree: boolean) {
