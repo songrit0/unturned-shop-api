@@ -14,6 +14,9 @@ import {
 const THAI_OFFSET_MS = 7 * 60 * 60 * 1000;
 const RESET_HOUR = 6; // daily reset at 06:00 Thai (aligned with the scheduled restart)
 
+/** Minimal slice of the JWT payload the gacha needs to identify + classify the caller. */
+type GachaUser = { steam_id: string | null; sub: string | null; is_admin?: boolean };
+
 @Injectable()
 export class GachaService implements OnModuleInit {
   private readonly log = new Logger(GachaService.name);
@@ -138,7 +141,7 @@ export class GachaService implements OnModuleInit {
   }
 
   // ---- identity ----
-  private async resolveSteam(user: { steam_id: string | null; sub: string | null }): Promise<string> {
+  private async resolveSteam(user: GachaUser): Promise<string> {
     const steam = user.steam_id ?? (await this.users.findSteamByDiscord(user.sub));
     if (!steam) throw new ForbiddenException('not_linked');
     return steam;
@@ -273,11 +276,11 @@ export class GachaService implements OnModuleInit {
   }
 
   // ---- player state ----
-  async state(user: { steam_id: string | null; sub: string | null }): Promise<GachaState> {
+  async state(user: GachaUser): Promise<GachaState> {
     const steam = await this.resolveSteam(user);
     const cfg = await this.getConfig();
     const day = this.gachaDay();
-    const rank = await this.rankOf(steam);
+    const rank = await this.effectiveRank(user, steam);
     const freeEntitlement = this.freeEntitlement(cfg, rank);
     const st = await this.db.first<{ free_used: number }>(
       `SELECT free_used FROM ${this.stateTbl()} WHERE steam_id = ? AND gacha_day = ?`,
@@ -303,20 +306,31 @@ export class GachaService implements OnModuleInit {
     };
   }
 
-  /** 1-based leaderboard rank by Kills, or null if the player has no PlayerStats row. */
+  /** Effective leaderboard rank for free-spin purposes. Admins are excluded from the
+   *  top-player free spins entirely (they get only base_free_spins). */
+  private async effectiveRank(user: GachaUser, steam: string): Promise<number | null> {
+    if (user?.is_admin) return null;
+    return this.rankOf(steam);
+  }
+
+  /** 1-based leaderboard rank by Kills, or null if the player has no (eligible) PlayerStats row.
+   *  NULL Kills are treated as 0 so a player with a NULL/empty row can't appear as rank 1. */
   private async rankOf(steam: string): Promise<number | null> {
     try {
+      // Must have an eligible (non-disabled) row to be ranked at all.
+      const self = await this.db.first<{ kills: number | null }>(
+        `SELECT COALESCE(Kills, 0) AS kills FROM \`PlayerStats\`
+         WHERE SteamId = ? AND (UIDisabled IS NULL OR UIDisabled = 0)`,
+        [steam],
+      );
+      if (!self) return null;
+      const myKills = Number(self.kills ?? 0);
       const row = await this.db.first<{ rnk: number }>(
         `SELECT COUNT(*) + 1 AS rnk FROM \`PlayerStats\` p
          WHERE (p.UIDisabled IS NULL OR p.UIDisabled = 0)
-           AND p.Kills > (SELECT Kills FROM \`PlayerStats\` WHERE SteamId = ?)`,
-        [steam],
+           AND COALESCE(p.Kills, 0) > ?`,
+        [myKills],
       );
-      // If the player isn't in PlayerStats the subquery is NULL → comparison NULL → rank = total+1
-      const self = await this.db.first<{ c: number }>(
-        `SELECT COUNT(*) AS c FROM \`PlayerStats\` WHERE SteamId = ?`, [steam],
-      );
-      if (!self || Number(self.c) === 0) return null;
       return row ? Number(row.rnk) : null;
     } catch {
       return null;
@@ -331,7 +345,7 @@ export class GachaService implements OnModuleInit {
 
   // ---- buy spins ----
   async buy(
-    user: { steam_id: string | null; sub: string | null },
+    user: GachaUser,
     count: number, currency: 'coins' | 'meowcoins',
   ): Promise<{ paidSpins: number; charged: number; currency: string }> {
     const steam = await this.resolveSteam(user);
@@ -387,7 +401,7 @@ export class GachaService implements OnModuleInit {
   }
 
   // ---- spin ----
-  async spin(user: { steam_id: string | null; sub: string | null }): Promise<GachaSpinResult> {
+  async spin(user: GachaUser): Promise<GachaSpinResult> {
     const steam = await this.resolveSteam(user);
     const cfg = await this.getConfig();
     if (!cfg.enabled) throw new ForbiddenException('gacha_disabled');
@@ -396,7 +410,7 @@ export class GachaService implements OnModuleInit {
     if (prizes.length === 0) throw new ConflictException('no_prizes_configured');
 
     const day = this.gachaDay();
-    const rank = await this.rankOf(steam);
+    const rank = await this.effectiveRank(user, steam);
     const freeEntitlement = this.freeEntitlement(cfg, rank);
 
     // Consume a spin: free first (bounded by entitlement), else a persistent paid spin.
