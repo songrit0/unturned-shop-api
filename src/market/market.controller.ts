@@ -100,9 +100,14 @@ export class MarketController {
     return this.history.transactionsForItem(itemId, parseInt(page!, 10), parseInt(limit!, 10));
   }
 
+  /** GET /market/:id?include_unlisted=1 — set include_unlisted to also return buy-only items (enabled_isforsell=0). */
   @Get(':id')
-  async getOne(@Param('id', ParseIntPipe) id: number) {
-    const item = await this.market.getById(id);
+  async getOne(
+    @Param('id', ParseIntPipe) id: number,
+    @Query('include_unlisted') includeUnlisted?: string,
+  ) {
+    const include = includeUnlisted === '1' || includeUnlisted === 'true';
+    const item = await this.market.getById(id, include);
     if (!item) throw new NotFoundException('Item not found');
     return item;
   }

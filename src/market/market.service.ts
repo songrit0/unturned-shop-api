@@ -16,6 +16,10 @@ export interface MarketItem {
   type_name: string | null;
   /** Meowcoin price, or null when not buyable with Meowcoin. */
   meowcoin_price: number | null;
+  /** 1 = listed in shop at all. */
+  enabled?: number;
+  /** 1 = shop actively sells it; 0 = buy-only (player can sell to shop, shop won't sell). */
+  enabled_isforsell?: number;
 }
 
 export type MarketKind = 'normal' | 'bills' | 'all';
@@ -161,17 +165,18 @@ export class MarketService {
     );
   }
 
-  async getById(id: number): Promise<MarketItem | null> {
+  async getById(id: number, includeUnlisted = false): Promise<MarketItem | null> {
     const market = this.db.table('sv', 'market');
     const items = this.db.table('sv', 'items');
     const itemTypes = this.db.table('sv', 'item_types');
+    const forSaleSql = includeUnlisted ? '' : ' AND m.enabled_isforsell = 1';
     return this.db.first<MarketItem>(
       `SELECT m.item_id, i.name, i.description, m.price, m.base_price, m.amount, m.target_stock,
-              i.image_url, i.type_id, t.name AS type_name, m.meowcoin_price
+              i.image_url, i.type_id, t.name AS type_name, m.meowcoin_price, m.enabled, m.enabled_isforsell
        FROM ${market} m
        LEFT JOIN ${items} i ON i.id = m.item_id
        LEFT JOIN ${itemTypes} t ON t.id = i.type_id
-       WHERE m.item_id = ? AND m.enabled_isforsell = 1 LIMIT 1`,
+       WHERE m.item_id = ?${forSaleSql} LIMIT 1`,
       [id],
     );
   }
