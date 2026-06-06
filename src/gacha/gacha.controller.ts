@@ -37,4 +37,10 @@ export class GachaController {
     const entries = await this.service.today(isNaN(n) ? 20 : n);
     return { entries };
   }
+
+  /** Active prize pool (display only) — used by the client to render the spin reel. */
+  @Get('prizes')
+  async prizes() {
+    return { prizes: await this.service.displayPool() };
+  }
 }

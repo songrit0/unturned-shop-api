@@ -206,6 +206,18 @@ export class GachaService implements OnModuleInit {
     return rows.map((r) => this.mapPrize(r));
   }
 
+  /** Display-only pool for the spin reel (no weights leaked). */
+  async displayPool(): Promise<Array<{ type: GachaPrizeType; label: string; amount: number; imageUrl: string | null; rarity: string | null }>> {
+    const prizes = await this.listActivePrizes();
+    return prizes.map((p) => ({
+      type: p.type,
+      label: this.prizeLabel(p),
+      amount: p.amount,
+      imageUrl: p.image_url,
+      rarity: p.rarity,
+    }));
+  }
+
   private mapPrize(r: any): GachaPrize {
     return {
       id: Number(r.id),
