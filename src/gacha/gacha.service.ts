@@ -206,6 +206,39 @@ export class GachaService implements OnModuleInit {
     return rows.map((r) => this.mapPrize(r));
   }
 
+  /** Who currently earns free spins by leaderboard rank (Top-N), plus the next reset time.
+   *  Drives the home "rank rewards" card. */
+  async rankRewards(): Promise<{
+    enabled: boolean;
+    nextResetAt: string;
+    entries: Array<{ rank: number; name: string; kills: number; spins: number }>;
+  }> {
+    const cfg = await this.getConfig();
+    const nextResetAt = this.nextResetAt().toISOString();
+    const ranks = Object.entries(cfg.rank_bonus || {})
+      .map(([r, s]) => ({ rank: Number(r), spins: Number(s) }))
+      .filter((x) => x.rank > 0 && x.spins > 0)
+      .sort((a, b) => a.rank - b.rank);
+    if (ranks.length === 0) return { enabled: cfg.enabled, nextResetAt, entries: [] };
+
+    const maxRank = Math.max(...ranks.map((r) => r.rank));
+    const spinByRank = new Map(ranks.map((r) => [r.rank, r.spins]));
+    let board: Array<{ name: string; kills: number }> = [];
+    try {
+      board = await this.playerStats.leaderboard(maxRank);
+    } catch {
+      board = [];
+    }
+    const entries = board
+      .map((p, i) => {
+        const rank = i + 1;
+        const spins = spinByRank.get(rank) ?? 0;
+        return spins > 0 ? { rank, name: p.name, kills: p.kills, spins } : null;
+      })
+      .filter((x): x is { rank: number; name: string; kills: number; spins: number } => x !== null);
+    return { enabled: cfg.enabled, nextResetAt, entries };
+  }
+
   /** Display-only pool for the spin reel (no weights leaked). */
   async displayPool(): Promise<Array<{ type: GachaPrizeType; label: string; amount: number; imageUrl: string | null; rarity: string | null }>> {
     const prizes = await this.listActivePrizes();

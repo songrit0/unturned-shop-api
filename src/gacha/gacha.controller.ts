@@ -43,4 +43,10 @@ export class GachaController {
   async prizes() {
     return { prizes: await this.service.displayPool() };
   }
+
+  /** Top players who earn free spins by rank + the next reset time (home card). */
+  @Get('rank-rewards')
+  rankRewards() {
+    return this.service.rankRewards();
+  }
 }
