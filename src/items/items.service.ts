@@ -38,8 +38,15 @@ export class ItemsService {
     const where: string[] = ['1=1'];
     const params: any[] = [];
     if (filters.q) {
-      where.push('i.name LIKE ?');
-      params.push(`%${filters.q}%`);
+      const q = filters.q.trim();
+      const idMatch = /^\d+$/.test(q);
+      if (idMatch) {
+        where.push('(i.name LIKE ? OR i.id = ?)');
+        params.push(`%${q}%`, Number(q));
+      } else {
+        where.push('i.name LIKE ?');
+        params.push(`%${q}%`);
+      }
     }
     if (filters.type_id != null) {
       where.push('i.type_id = ?');
