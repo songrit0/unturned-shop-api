@@ -440,8 +440,11 @@ export class GachaService implements OnModuleInit {
         remaining,
       };
     } catch (e: any) {
-      await this.refundSpin(steam, day, usedFree);
-      this.log.warn(`Gacha deliver failed for ${steam}: ${e.message}`);
+      try { await this.refundSpin(steam, day, usedFree); } catch { /* best-effort refund */ }
+      this.log.error(
+        `Gacha deliver failed for ${steam} (prize #${prize.id} ${prize.type} ref=${prize.ref_id}): ${e?.message}`,
+        e?.stack,
+      );
       throw new ConflictException('delivery_failed');
     }
   }
