@@ -24,6 +24,8 @@ INSERT IGNORE INTO `sv_daily_reward_config` (tier, enabled, coins, code_ttl_days
 VALUES ('normal', 1, 0, 30), ('vip', 1, 0, 30);
 
 -- (b) per-tier item/vehicle list (kind 0=item, 1=vehicle).
+-- No label/image_url: name + image LIVE-REFERENCE the Master Items catalogs at read time
+-- (kind=0 -> sv_items, kind=1 -> sv_vehicles), joined by item_id.
 CREATE TABLE IF NOT EXISTS `sv_daily_reward_items` (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   tier ENUM('normal','vip') NOT NULL,
@@ -31,8 +33,6 @@ CREATE TABLE IF NOT EXISTS `sv_daily_reward_items` (
   amount INT UNSIGNED NOT NULL DEFAULT 1,
   quality TINYINT UNSIGNED NOT NULL DEFAULT 100,
   kind TINYINT UNSIGNED NOT NULL DEFAULT 0,
-  label VARCHAR(128) NULL,
-  image_url VARCHAR(512) NULL,
   sort INT NOT NULL DEFAULT 0,
   enabled TINYINT(1) NOT NULL DEFAULT 1,
   PRIMARY KEY (id),

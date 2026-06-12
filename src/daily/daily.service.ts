@@ -25,15 +25,14 @@ export interface DailyTierConfigInput {
   codeTtlDays?: number;
 }
 
-/** Fields for creating/updating one reward-item row. */
+/** Fields for creating/updating one reward-item row. label/imageUrl are NOT stored —
+ *  they live-reference the Master Items catalogs by (kind, item_id). */
 export interface DailyItemInput {
   tier?: DailyTier;
   itemId?: number;
   amount?: number;
   quality?: number;
   kind?: DailyKind;
-  label?: string | null;
-  imageUrl?: string | null;
   sort?: number;
   enabled?: boolean;
 }
@@ -56,6 +55,9 @@ export class DailyService implements OnModuleInit {
   private grantsTbl() { return this.db.table('sv', 'vip_grants'); }
   private codeItemsTbl() { return this.db.table('rc', 'code_items'); }
   private codeOwnersTbl() { return this.db.table('sv', 'code_owners'); }
+  // Master Items catalogs the daily items live-reference for name/image (kind 0 -> items, 1 -> vehicles).
+  private catalogTbl() { return this.db.table('sv', 'items'); }
+  private vehicleCatalogTbl() { return this.db.table('sv', 'vehicles'); }
 
   async onModuleInit() {
     try {
@@ -85,8 +87,6 @@ export class DailyService implements OnModuleInit {
           amount INT UNSIGNED NOT NULL DEFAULT 1,
           quality TINYINT UNSIGNED NOT NULL DEFAULT 100,
           kind TINYINT UNSIGNED NOT NULL DEFAULT 0,
-          label VARCHAR(128) NULL,
-          image_url VARCHAR(512) NULL,
           sort INT NOT NULL DEFAULT 0,
           enabled TINYINT(1) NOT NULL DEFAULT 1,
           PRIMARY KEY (id),
@@ -153,6 +153,8 @@ export class DailyService implements OnModuleInit {
   }
 
   // ---- config + items reads ----
+  /** Map a daily_reward_items row. label/imageUrl come from the catalog JOIN aliases
+   *  (cat_name/cat_image) when present, else null — they are never stored on the row. */
   private mapItem(r: any): DailyRewardItem {
     return {
       id: Number(r.id),
@@ -161,11 +163,23 @@ export class DailyService implements OnModuleInit {
       amount: Number(r.amount),
       quality: Number(r.quality),
       kind: (Number(r.kind) === 1 ? 1 : 0) as DailyKind,
-      label: r.label ?? null,
-      imageUrl: r.image_url ?? null,
+      label: r.cat_name ?? null,
+      imageUrl: r.cat_image ?? null,
       sort: Number(r.sort),
       enabled: Number(r.enabled) === 1,
     };
+  }
+
+  /** SELECT list that LEFT JOINs both Master Items catalogs and resolves label/image by kind.
+   *  kind=0 -> sv_items, kind=1 -> sv_vehicles. Missing catalog row -> NULL (no crash). */
+  private itemsSelectSql(whereSql: string): string {
+    return `SELECT d.*,
+                   COALESCE(it.name, ve.name) AS cat_name,
+                   COALESCE(it.image_url, ve.image_url) AS cat_image
+            FROM ${this.itemsTbl()} d
+            LEFT JOIN ${this.catalogTbl()} it ON d.kind = 0 AND it.id = d.item_id
+            LEFT JOIN ${this.vehicleCatalogTbl()} ve ON d.kind = 1 AND ve.id = d.item_id
+            ${whereSql}`;
   }
 
   private async tierConfigRow(tier: DailyTier): Promise<{ enabled: boolean; coins: number; codeTtlDays: number }> {
@@ -180,9 +194,9 @@ export class DailyService implements OnModuleInit {
   }
 
   private async tierItems(tier: DailyTier, enabledOnly: boolean): Promise<DailyRewardItem[]> {
-    const where = enabledOnly ? 'tier = ? AND enabled = 1' : 'tier = ?';
+    const where = enabledOnly ? 'WHERE d.tier = ? AND d.enabled = 1' : 'WHERE d.tier = ?';
     const rows = await this.db.query<any>(
-      `SELECT * FROM ${this.itemsTbl()} WHERE ${where} ORDER BY sort ASC, id ASC`, [tier],
+      `${this.itemsSelectSql(where)} ORDER BY d.sort ASC, d.id ASC`, [tier],
     );
     return rows.map((r) => this.mapItem(r));
   }
@@ -350,14 +364,15 @@ export class DailyService implements OnModuleInit {
   // ---- admin: items CRUD ----
   async createItem(input: DailyItemInput): Promise<DailyRewardItem> {
     this.validateItem(input, true);
+    const kind: DailyKind = input.kind === 1 ? 1 : 0;
+    await this.assertInCatalog(Number(input.itemId), kind);
     const res: any = await this.db.query(
       `INSERT INTO ${this.itemsTbl()}
-        (tier, item_id, amount, quality, kind, label, image_url, sort, enabled)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        (tier, item_id, amount, quality, kind, sort, enabled)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [
         input.tier, input.itemId, Math.max(1, Number(input.amount ?? 1)),
-        clampInt(input.quality ?? 100, 0, 100), input.kind === 1 ? 1 : 0,
-        input.label ?? null, input.imageUrl ?? null, Number(input.sort ?? 0),
+        clampInt(input.quality ?? 100, 0, 100), kind, Number(input.sort ?? 0),
         input.enabled === false ? 0 : 1,
       ],
     );
@@ -367,16 +382,26 @@ export class DailyService implements OnModuleInit {
   async updateItem(id: number, input: DailyItemInput): Promise<DailyRewardItem> {
     const existing = await this.db.first<any>(`SELECT * FROM ${this.itemsTbl()} WHERE id = ?`, [id]);
     if (!existing) throw new NotFoundException('item_not_found');
-    const merged = { ...this.mapItem(existing), ...stripUndefined(input) };
+    // Merge against the raw stored row (item_id/kind/etc.), not the catalog-hydrated view.
+    const merged = {
+      tier: (existing.tier as DailyTier),
+      itemId: Number(existing.item_id),
+      amount: Number(existing.amount),
+      quality: Number(existing.quality),
+      kind: (Number(existing.kind) === 1 ? 1 : 0) as DailyKind,
+      sort: Number(existing.sort),
+      enabled: Number(existing.enabled) === 1,
+      ...stripUndefined(input),
+    };
     this.validateItem(merged, false);
+    await this.assertInCatalog(Number(merged.itemId), merged.kind);
     await this.db.query(
       `UPDATE ${this.itemsTbl()} SET tier = ?, item_id = ?, amount = ?, quality = ?, kind = ?,
-         label = ?, image_url = ?, sort = ?, enabled = ? WHERE id = ?`,
+         sort = ?, enabled = ? WHERE id = ?`,
       [
         merged.tier, merged.itemId, Math.max(1, Number(merged.amount)),
         clampInt(merged.quality, 0, 100), merged.kind === 1 ? 1 : 0,
-        merged.label ?? null, merged.imageUrl ?? null, Number(merged.sort),
-        merged.enabled ? 1 : 0, id,
+        Number(merged.sort), merged.enabled ? 1 : 0, id,
       ],
     );
     return this.getItem(id);
@@ -388,9 +413,18 @@ export class DailyService implements OnModuleInit {
   }
 
   private async getItem(id: number): Promise<DailyRewardItem> {
-    const row = await this.db.first<any>(`SELECT * FROM ${this.itemsTbl()} WHERE id = ?`, [id]);
+    const row = await this.db.first<any>(`${this.itemsSelectSql('WHERE d.id = ?')}`, [id]);
     if (!row) throw new NotFoundException('item_not_found');
     return this.mapItem(row);
+  }
+
+  /** Reject an item_id that isn't present in the catalog matching its kind. */
+  private async assertInCatalog(itemId: number, kind: DailyKind) {
+    const tbl = kind === 1 ? this.vehicleCatalogTbl() : this.catalogTbl();
+    const row = await this.db.first<{ c: number }>(
+      `SELECT COUNT(*) AS c FROM ${tbl} WHERE id = ?`, [itemId],
+    );
+    if (!row || Number(row.c) === 0) throw new BadRequestException('item_not_in_catalog');
   }
 
   private validateItem(p: { tier?: DailyTier; itemId?: number; kind?: DailyKind }, isCreate: boolean) {

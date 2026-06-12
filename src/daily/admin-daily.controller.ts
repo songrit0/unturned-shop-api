@@ -2,7 +2,7 @@ import {
   Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Put, UseGuards,
 } from '@nestjs/common';
 import {
-  IsBoolean, IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min,
+  IsBoolean, IsIn, IsInt, IsOptional, Max, Min,
 } from 'class-validator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { AdminGuard } from '../common/guards/admin.guard';
@@ -21,8 +21,6 @@ class CreateItemDto {
   @IsInt() @Min(1) amount!: number;
   @IsOptional() @IsInt() @Min(0) @Max(100) quality?: number;
   @IsOptional() @IsIn([0, 1]) kind?: DailyKind;
-  @IsOptional() @IsString() @MaxLength(128) label?: string | null;
-  @IsOptional() @IsString() @MaxLength(512) imageUrl?: string | null;
   @IsOptional() @IsInt() sort?: number;
   @IsOptional() @IsBoolean() enabled?: boolean;
 }
@@ -33,8 +31,6 @@ class UpdateItemDto {
   @IsOptional() @IsInt() @Min(1) amount?: number;
   @IsOptional() @IsInt() @Min(0) @Max(100) quality?: number;
   @IsOptional() @IsIn([0, 1]) kind?: DailyKind;
-  @IsOptional() @IsString() @MaxLength(128) label?: string | null;
-  @IsOptional() @IsString() @MaxLength(512) imageUrl?: string | null;
   @IsOptional() @IsInt() sort?: number;
   @IsOptional() @IsBoolean() enabled?: boolean;
 }
