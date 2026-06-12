@@ -639,7 +639,12 @@ export class GachaService implements OnModuleInit {
     const n = clampInt(limit, 1, 50);
     const day = this.gachaDay();
     const rows = await this.db.query<any>(
-      `SELECT d.prize_type, d.prize_label, d.prize_amount, d.prize_image_url, d.rarity, d.created_at,
+      // Return created_at as a literal UTC ISO string straight from MySQL. The draws.created_at
+      // DATETIME is stored UTC (the app's convention; see UTC_TIMESTAMP usage elsewhere), so we
+      // format it with a trailing 'Z' rather than letting mysql2 re-interpret it under its default
+      // timezone:'local' — which would shift `at` by the host's UTC offset and mislabel the feed.
+      `SELECT d.prize_type, d.prize_label, d.prize_amount, d.prize_image_url, d.rarity,
+              DATE_FORMAT(d.created_at, '%Y-%m-%dT%H:%i:%sZ') AS created_at,
               COALESCE(l.discord_username, l.discord_global_name, p.Name, 'Player') AS name
        FROM ${this.drawsTbl()} d
        LEFT JOIN ${this.db.table('sv', 'links')} l ON l.steam_id = d.steam_id
@@ -656,7 +661,7 @@ export class GachaService implements OnModuleInit {
       prizeAmount: Number(r.prize_amount),
       imageUrl: r.prize_image_url ?? null,
       rarity: r.rarity ?? null,
-      at: r.created_at ? new Date(r.created_at).toISOString() : '',
+      at: r.created_at ?? '',
     }));
   }
 }

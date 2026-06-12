@@ -272,12 +272,16 @@ export class CoinsService {
       const total = cntRow ? Number(cntRow.c) : 0;
 
       const rows = await this.db.query<any>(
-        `SELECT * FROM (${unionSql}) AS unified ORDER BY at DESC LIMIT ? OFFSET ?`,
+        // Format `at` as a literal UTC ISO string. The source DATETIMEs are stored UTC, but mysql2's
+        // default timezone:'local' returns them as JS Dates in the host zone, so new Date(at)/.toISOString()
+        // would shift by the host offset. ORDER BY still uses the raw `at` (correct ordering).
+        `SELECT unified.*, DATE_FORMAT(unified.at, '%Y-%m-%dT%H:%i:%sZ') AS at_iso
+         FROM (${unionSql}) AS unified ORDER BY at DESC LIMIT ? OFFSET ?`,
         [...unionParams, np.limit, np.offset],
       );
 
       const items_out: HistoryRow[] = rows.map((r) => ({
-        at: r.at instanceof Date ? r.at.toISOString() : new Date(r.at).toISOString(),
+        at: r.at_iso ?? '',
         source: r.source,
         direction: r.direction,
         coins: Number(r.coins),

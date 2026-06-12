@@ -70,19 +70,22 @@ export class PublicService {
     };
     try {
       const row = await this.db.first<any>(
-        `SELECT online, players, max_players, next_restart, state,
+        // Format next_restart as a literal UTC ISO string in SQL. The DATETIME is stored UTC, but
+        // mysql2's default timezone:'local' would re-interpret a JS Date by the host offset, so we
+        // emit the 'Z' string directly instead of new Date(col).toISOString().
+        `SELECT online, players, max_players, state,
+                DATE_FORMAT(next_restart, '%Y-%m-%dT%H:%i:%sZ') AS next_restart,
                 TIMESTAMPDIFF(SECOND, updated_at, NOW()) AS age_seconds
          FROM ${this.db.tableRaw('sr_status')} WHERE id = 1`,
       );
       if (!row) return offline;
       const age = row.age_seconds == null ? null : Number(row.age_seconds);
       const fresh = age != null && age <= STALE_AFTER_SECONDS;
-      const nr = row.next_restart ? new Date(row.next_restart) : null;
       return {
         online: Number(row.online) === 1 && fresh,
         players: Number(row.players) || 0,
         maxPlayers: Number(row.max_players) || 0,
-        nextRestart: nr ? nr.toISOString() : null,
+        nextRestart: row.next_restart ?? null,
         state: String(row.state ?? 'idle'),
       };
     } catch (e: any) {
@@ -97,7 +100,10 @@ export class PublicService {
     const n = Math.min(Math.max(1, limit), 24);
     try {
       const rows = await this.db.query<any>(
-        `SELECT l.id, l.item_id, l.amount, l.price, l.created_at,
+        // created_at as a literal UTC ISO string — stored UTC but mysql2 timezone:'local' would
+        // otherwise shift it by the host offset on a new Date() re-wrap.
+        `SELECT l.id, l.item_id, l.amount, l.price,
+                DATE_FORMAT(l.created_at, '%Y-%m-%dT%H:%i:%sZ') AS created_at,
                 i.name AS item_name, i.image_url
          FROM ${this.db.table('sv', 'p2p_listings')} l
          LEFT JOIN ${this.db.table('sv', 'items')} i ON i.id = l.item_id
@@ -113,7 +119,7 @@ export class PublicService {
         imageUrl: r.image_url ?? null,
         price: Number(r.price),
         amount: Number(r.amount),
-        createdAt: r.created_at ? new Date(r.created_at).toISOString() : '',
+        createdAt: r.created_at ?? '',
       }));
     } catch (e: any) {
       this.log.warn(`p2pLatest failed: ${e.message}`);
