@@ -201,18 +201,47 @@ export class DailyService implements OnModuleInit {
     return rows.map((r) => this.mapItem(r));
   }
 
-  /** A tier's grantable bundle (coins + enabled items/vehicles), shaped for the player. */
-  private async tierBundle(tier: DailyTier): Promise<DailyRewardBundle> {
-    const cfg = await this.tierConfigRow(tier);
-    const items = await this.tierItems(tier, true);
-    const toGood = (i: DailyRewardItem): DailyRewardGood => ({
+  /**
+   * The tiers a caller receives, intersected with which tiers are enabled:
+   *   - normal player -> ['normal']
+   *   - VIP player    -> ['normal', 'vip']  (VIP gets normal + vip combined)
+   * Returns only the enabled subset (a tier whose config.enabled=0 is dropped).
+   */
+  private async effectiveTiers(playerTier: DailyTier): Promise<DailyTier[]> {
+    const applicable: DailyTier[] = playerTier === 'vip' ? ['normal', 'vip'] : ['normal'];
+    const out: DailyTier[] = [];
+    for (const t of applicable) {
+      const cfg = await this.tierConfigRow(t);
+      if (cfg.enabled) out.push(t);
+    }
+    return out;
+  }
+
+  private static toGood(i: DailyRewardItem): DailyRewardGood {
+    return {
       itemId: i.itemId, amount: i.amount, quality: i.quality,
       label: i.label, imageUrl: i.imageUrl, kind: i.kind,
-    });
+    };
+  }
+
+  /**
+   * The combined grantable bundle UNION-ed across the given (already enabled) tiers:
+   * coins = SUM of each tier's coins; items/vehicles = all enabled goods from every tier.
+   * Items are gathered tier-by-tier (each tier already ordered by sort,id), so order is
+   * stable: normal's goods first, then vip's.
+   */
+  private async combinedBundle(tiers: DailyTier[]): Promise<DailyRewardBundle> {
+    let coins = 0;
+    const all: DailyRewardItem[] = [];
+    for (const t of tiers) {
+      const cfg = await this.tierConfigRow(t);
+      coins += cfg.coins;
+      all.push(...(await this.tierItems(t, true)));
+    }
     return {
-      coins: cfg.coins,
-      items: items.filter((i) => i.kind === 0).map(toGood),
-      vehicles: items.filter((i) => i.kind === 1).map(toGood),
+      coins,
+      items: all.filter((i) => i.kind === 0).map(DailyService.toGood),
+      vehicles: all.filter((i) => i.kind === 1).map(DailyService.toGood),
     };
   }
 
@@ -220,20 +249,22 @@ export class DailyService implements OnModuleInit {
   async status(user: DailyUser): Promise<DailyStatus> {
     const steam = await this.resolveSteam(user);
     const tier = await this.resolveTier(steam);
-    const cfg = await this.tierConfigRow(tier);
+    const effective = await this.effectiveTiers(tier);
+    const enabled = effective.length > 0; // at least one applicable tier is enabled
     const day = this.dailyDay();
 
     const claimed = await this.db.first<{ id: number }>(
       `SELECT id FROM ${this.claimsTbl()} WHERE steam_id = ? AND claim_date = ?`, [steam, day],
     );
     const alreadyClaimedToday = !!claimed;
-    const reward = await this.tierBundle(tier);
+    // Reward = UNION across the effective tiers (VIP -> normal + vip combined).
+    const reward = await this.combinedBundle(effective);
 
     return {
-      enabled: cfg.enabled,
+      enabled,
       tier,
       alreadyClaimedToday,
-      canClaim: cfg.enabled && !alreadyClaimedToday,
+      canClaim: enabled && !alreadyClaimedToday,
       nextResetAt: this.nextResetAt().toISOString(),
       reward,
     };
@@ -243,12 +274,24 @@ export class DailyService implements OnModuleInit {
   async claim(user: DailyUser): Promise<DailyClaimResult> {
     const steam = await this.resolveSteam(user);
     const tier = await this.resolveTier(steam);
-    const cfg = await this.tierConfigRow(tier);
-    if (!cfg.enabled) throw new ForbiddenException('daily_disabled');
+    const effective = await this.effectiveTiers(tier);
+    if (effective.length === 0) throw new ForbiddenException('daily_disabled');
 
     const day = this.dailyDay();
-    const items = await this.tierItems(tier, true);
-    const goods = items.filter((i) => i.itemId > 0);
+
+    // Aggregate across the effective tiers (VIP -> normal + vip combined):
+    //   coins = SUM of each tier's coins; goods = all enabled items/vehicles;
+    //   code TTL = the longest TTL among the contributing tiers (one shared code).
+    let coins = 0;
+    let codeTtlDays = 30;
+    const goods: DailyRewardItem[] = [];
+    for (const t of effective) {
+      const cfg = await this.tierConfigRow(t);
+      coins += cfg.coins;
+      codeTtlDays = Math.max(codeTtlDays, cfg.codeTtlDays);
+      const items = await this.tierItems(t, true);
+      goods.push(...items.filter((i) => i.itemId > 0));
+    }
 
     const conn = await this.db.getConnection();
     try {
@@ -256,10 +299,11 @@ export class DailyService implements OnModuleInit {
 
       // 1) UNIQUE gate. Inserting the claim row first reserves the day; a dup key means
       //    the caller already claimed today (or a concurrent claim won the race).
+      //    The claim row's `tier` is the player's VIP status (display), `coins` the summed total.
       try {
         await conn.query(
           `INSERT INTO ${this.claimsTbl()} (steam_id, claim_date, tier, coins) VALUES (?, ?, ?, ?)`,
-          [steam, day, tier, cfg.coins],
+          [steam, day, tier, coins],
         );
       } catch (e: any) {
         await conn.rollback();
@@ -269,18 +313,18 @@ export class DailyService implements OnModuleInit {
       const claimId = await this.lastInsertId(conn);
 
       // 2) Credit coins (sv_coins) — idempotent upsert, same as gacha/vip.
-      if (cfg.coins > 0) {
+      if (coins > 0) {
         await conn.query(
           `INSERT INTO ${this.coinsTbl()} (steam_id, balance) VALUES (?, ?)
            ON DUPLICATE KEY UPDATE balance = balance + VALUES(balance)`,
-          [steam, cfg.coins],
+          [steam, coins],
         );
       }
 
-      // 3) Mint a single 1-use rc_code carrying every item + vehicle in the bundle.
+      // 3) Mint a single 1-use rc_code carrying every item + vehicle across all effective tiers.
       let redeemCode: string | null = null;
       if (goods.length > 0) {
-        const { code, codeId } = await this.purchases.insertNewCode(conn, cfg.codeTtlDays);
+        const { code, codeId } = await this.purchases.insertNewCode(conn, codeTtlDays);
         for (const g of goods) {
           const kind: DailyKind = g.kind === 1 ? 1 : 0;
           await conn.query(
@@ -301,17 +345,13 @@ export class DailyService implements OnModuleInit {
 
       await conn.commit();
 
-      const toGood = (i: DailyRewardItem): DailyRewardGood => ({
-        itemId: i.itemId, amount: i.amount, quality: i.quality,
-        label: i.label, imageUrl: i.imageUrl, kind: i.kind,
-      });
       return {
         ok: true,
         tier,
         granted: {
-          coins: cfg.coins,
-          items: goods.filter((g) => g.kind === 0).map(toGood),
-          vehicles: goods.filter((g) => g.kind === 1).map(toGood),
+          coins,
+          items: goods.filter((g) => g.kind === 0).map(DailyService.toGood),
+          vehicles: goods.filter((g) => g.kind === 1).map(DailyService.toGood),
         },
         redeemCode,
         nextResetAt: this.nextResetAt().toISOString(),
