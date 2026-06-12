@@ -23,6 +23,12 @@ export class AdminCodesController {
     return this.svc.listAll(q.q, q.page, q.limit);
   }
 
+  /** GET /admin/codes/export — all UNOWNED + still-usable codes for Discord giveaways. Not paginated. */
+  @Get('export')
+  exportUnowned() {
+    return this.svc.exportUnowned();
+  }
+
   /** POST /admin/codes — create a public/unowned redeem code. Body validated in the service. */
   @Post()
   create(@Body() body: CreateCodeInput) {

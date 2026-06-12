@@ -20,6 +20,17 @@ export interface AdminCodeRow {
   items: AdminCodeItem[];
 }
 
+/** One reward in an exported code (name + kind + amount; no image — the giveaway text just needs the name). */
+export interface ExportCodeReward { itemId: number; kind: number; amount: number; name: string | null; }
+/** A single unowned, still-usable code in the giveaway export. */
+export interface ExportCode {
+  code: string;
+  maxUses: number;
+  uses: number;
+  expiresAt: string | null;
+  rewards: ExportCodeReward[];
+}
+
 export interface CreateCodeReward { kind: RewardKind; id: number; amount: number; quality?: number; }
 export interface CreateCodeInput {
   code?: string;
@@ -209,6 +220,43 @@ export class AdminCodesService {
     const items = rows.map(r => this.toRow(r, itemsByCode.get(Number(r.code_id)) || []));
 
     return { items, total, page: np.page, limit: np.limit, pages: Math.ceil(total / np.limit) };
+  }
+
+  /**
+   * Export every UNOWNED + still-usable code (for an admin to paste into Discord giveaways).
+   * NOT paginated. A code qualifies when it has NO sv_code_owners row (player-minted codes from
+   * purchase/gacha/daily DO have an owner and are excluded) AND it is enabled, not expired, and
+   * not used up. Newest first. expiresAt is emitted as a literal UTC ISO string (mysql2 reads
+   * DATETIME under timezone:'local', so format with 'Z' in SQL rather than re-wrapping with new Date()).
+   */
+  async exportUnowned(): Promise<{ count: number; codes: ExportCode[] }> {
+    const codes = this.db.table('rc', 'codes');
+    const owners = this.db.table('sv', 'code_owners');
+
+    const rows = await this.db.query<any>(
+      `SELECT c.id AS code_id, c.code, c.max_uses, c.uses,
+              DATE_FORMAT(c.expires_at, '%Y-%m-%dT%H:%i:%sZ') AS expires_at
+       FROM ${codes} c
+       LEFT JOIN ${owners} o ON o.code_id = c.id
+       WHERE o.code_id IS NULL
+         AND c.enabled = 1
+         AND (c.expires_at IS NULL OR c.expires_at > UTC_TIMESTAMP())
+         AND (c.max_uses = 0 OR c.uses < c.max_uses)
+       ORDER BY c.id DESC`,
+    );
+    if (rows.length === 0) return { count: 0, codes: [] };
+
+    const itemsByCode = await this.itemsForCodes(rows.map(r => Number(r.code_id)));
+    const out: ExportCode[] = rows.map(r => ({
+      code: r.code,
+      maxUses: Number(r.max_uses),
+      uses: Number(r.uses),
+      expiresAt: r.expires_at ?? null,
+      rewards: (itemsByCode.get(Number(r.code_id)) || []).map(it => ({
+        itemId: it.item_id, kind: it.kind, amount: it.amount, name: it.name,
+      })),
+    }));
+    return { count: out.length, codes: out };
   }
 
   /** Fetch a single code as a list-shaped row. */
