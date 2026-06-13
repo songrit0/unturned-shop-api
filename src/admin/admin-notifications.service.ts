@@ -22,7 +22,8 @@ export class AdminNotificationsService {
   constructor(private readonly db: DbService) {}
 
   private table() {
-    return this.db.table('sv', 'notifications');
+    // NOT sv_notifications (that name is the shop's Discord-DM queue). This is the in-game phone feed.
+    return this.db.table('sv', 'phone_notifications');
   }
 
   private async ensureTable() {
