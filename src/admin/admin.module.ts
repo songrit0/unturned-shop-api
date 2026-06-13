@@ -9,12 +9,14 @@ import { AdminVehicleMarketController } from './admin-vehicle-market.controller'
 import { AdminVehicleMarketService } from './admin-vehicle-market.service';
 import { AdminCodesController } from './admin-codes.controller';
 import { AdminCodesService } from './admin-codes.service';
+import { AdminNotificationsController } from './admin-notifications.controller';
+import { AdminNotificationsService } from './admin-notifications.service';
 import { CoinsModule } from '../coins/coins.module';
 
 @Module({
   imports: [CoinsModule],
-  controllers: [AdminMarketController, AdminCoinsController, AdminVipController, AdminVehicleMarketController, AdminCodesController],
-  providers: [AdminMarketService, AdminCoinsService, AdminVipService, AdminVehicleMarketService, AdminCodesService],
+  controllers: [AdminMarketController, AdminCoinsController, AdminVipController, AdminVehicleMarketController, AdminCodesController, AdminNotificationsController],
+  providers: [AdminMarketService, AdminCoinsService, AdminVipService, AdminVehicleMarketService, AdminCodesService, AdminNotificationsService],
   exports: [AdminMarketService],
 })
 export class AdminModule {}
