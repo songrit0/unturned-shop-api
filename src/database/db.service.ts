@@ -96,6 +96,85 @@ export class DbService implements OnModuleInit, OnModuleDestroy {
 
     // Player-to-player Coin transfers ledger (migration 013)
     await this.ensureCoinTransfersTable();
+
+    // XP -> Coins: mirror table + web request queue (migration 015)
+    await this.ensureXpTables();
+
+    // HELP topics (migration 016): in-game command guide, admin-managed from the web
+    await this.ensureHelpTable();
+  }
+
+  /**
+   * HELP topics (migration 016). A NEW shared table of in-game "command guide" pages. Admins add/
+   * edit/delete them from the web shop; the GameMenu phone reads them directly from MySQL and shows
+   * each as a popup page. Additive + idempotent.
+   */
+  private async ensureHelpTable() {
+    const t = this.table('sv', 'help_topics');
+    try {
+      await this.query(
+        `CREATE TABLE IF NOT EXISTS ${t} (
+          id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+          title VARCHAR(128) NOT NULL,
+          body MEDIUMTEXT NOT NULL,
+          category VARCHAR(64) DEFAULT NULL,
+          icon VARCHAR(8) DEFAULT NULL,
+          sort_order INT NOT NULL DEFAULT 0,
+          enabled TINYINT(1) NOT NULL DEFAULT 1,
+          created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          PRIMARY KEY (id),
+          INDEX idx_enabled_order (enabled, sort_order)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+      );
+      this.log.log('HELP table ready (sv_help_topics)');
+    } catch (e: any) {
+      this.log.warn(`help_topics ensure failed: ${e.message}`);
+    }
+  }
+
+  /**
+   * XP -> Coins (migration 015). Two NEW shared tables read/written by the GameMenu plugin:
+   *   player_xp    — the plugin mirrors each online player's live XP + online flag here so the web
+   *                  can show it (XP is server-only state, never otherwise in the DB).
+   *   xp_requests  — web -> game conversion queue. The web inserts 'pending'; the plugin claims,
+   *                  deducts XP in-game, credits coins, and finalizes the row. Additive + idempotent.
+   */
+  private async ensureXpTables() {
+    const playerXp = this.table('sv', 'player_xp');
+    const requests = this.table('sv', 'xp_requests');
+    try {
+      await this.query(
+        `CREATE TABLE IF NOT EXISTS ${playerXp} (
+          steam_id VARCHAR(32) NOT NULL,
+          xp BIGINT UNSIGNED NOT NULL DEFAULT 0,
+          name VARCHAR(64) DEFAULT NULL,
+          online TINYINT(1) NOT NULL DEFAULT 0,
+          updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          PRIMARY KEY (steam_id),
+          INDEX idx_online (online)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+      );
+      await this.query(
+        `CREATE TABLE IF NOT EXISTS ${requests} (
+          id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+          steam_id VARCHAR(32) NOT NULL,
+          requested_xp INT UNSIGNED NOT NULL,
+          status ENUM('pending','processing','done','insufficient','offline','error') NOT NULL DEFAULT 'pending',
+          coins_granted BIGINT DEFAULT NULL,
+          xp_spent INT UNSIGNED DEFAULT NULL,
+          source VARCHAR(16) NOT NULL DEFAULT 'web',
+          created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          processed_at DATETIME DEFAULT NULL,
+          PRIMARY KEY (id),
+          INDEX idx_status (status),
+          INDEX idx_steam_created (steam_id, created_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+      );
+      this.log.log('XP tables ready (sv_player_xp / sv_xp_requests)');
+    } catch (e: any) {
+      this.log.warn(`xp tables ensure failed: ${e.message}`);
+    }
   }
 
   /**

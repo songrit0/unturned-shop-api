@@ -32,6 +32,8 @@ import { PlayerStatsModule } from './player-stats/player-stats.module';
 import { PublicModule } from './public/public.module';
 import { GachaModule } from './gacha/gacha.module';
 import { DailyModule } from './daily/daily.module';
+import { XpModule } from './xp/xp.module';
+import { HelpModule } from './help/help.module';
 import { HealthController } from './health/health.controller';
 import { VersionController } from './health/version.controller';
 
@@ -69,6 +71,8 @@ import { VersionController } from './health/version.controller';
     PublicModule,
     GachaModule,
     DailyModule,
+    XpModule,
+    HelpModule,
   ],
   controllers: [HealthController, VersionController],
 })

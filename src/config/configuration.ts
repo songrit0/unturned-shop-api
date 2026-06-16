@@ -21,6 +21,13 @@ export interface AppConfig {
    */
   coin: { transferFee: number; transferMin: number };
   /**
+   * XP -> Coins conversion. The player burns in-game experience for coins, minus a percentage fee.
+   * These values MUST mirror the GameMenu plugin's config (XpToCoinRate / XpConvertFeePercent /
+   * XpConvertMin): the plugin is the authority that actually deducts XP + credits coins, so the web
+   * only previews. rate = coins per 1 XP before the fee; feePercent burned; min = least XP per convert.
+   */
+  xp: { rate: number; feePercent: number; min: number };
+  /**
    * Real-money top-up settings. The Meowcoin wallet + top-up records live in a SEPARATE
    * Pi5-local MariaDB (topupDb), never the external shop DB.
    */
@@ -105,6 +112,12 @@ export default (): AppConfig => ({
     // Flat fee burned on every P2P transfer; min transfer must exceed it.
     transferFee: parseInt(process.env.COIN_TRANSFER_FEE || '200', 10),
     transferMin: parseInt(process.env.COIN_TRANSFER_MIN || '201', 10),
+  },
+  xp: {
+    // MUST match the GameMenu plugin (XpToCoinRate / XpConvertFeePercent / XpConvertMin).
+    rate: parseFloat(process.env.XP_COIN_RATE || '1'),
+    feePercent: parseFloat(process.env.XP_CONVERT_FEE_PERCENT || '10'),
+    min: parseInt(process.env.XP_CONVERT_MIN || '100', 10),
   },
   topup: {
     // Backward-compat: prefer MEOWCOIN_PER_BAHT, fall back to the legacy VCOIN_PER_BAHT.
