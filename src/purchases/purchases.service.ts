@@ -9,7 +9,7 @@ import { randomInt } from 'crypto';
 import * as mysql from 'mysql2/promise';
 import { DbService } from '../database/db.service';
 import { Paginated, normalizePage } from '../common/pagination';
-import { ClaimAllResult, PurchaseFilter, PurchaseRow, PurchaseView } from './purchases.types';
+import { ClaimAllResult, PurchaseFilter, PurchaseItemRow, PurchaseRow, PurchaseView } from './purchases.types';
 
 // A-Z + 2-9, excluding the visually ambiguous I, O, 0, 1.
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -22,7 +22,8 @@ const CLAIM_ALL_MAX = 200;
 export class PurchasesService {
   constructor(private readonly db: DbService) {}
 
-  private purchasesTbl()   { return this.db.table('sv', 'p2p_purchases'); }
+  private purchasesTbl()     { return this.db.table('sv', 'p2p_purchases'); }
+  private purchaseItemsTbl() { return this.db.table('sv', 'p2p_purchase_items'); }
   private itemsTbl()       { return this.db.table('sv', 'items'); }
   private itemTypesTbl()   { return this.db.table('sv', 'item_types'); }
   private codesTbl()       { return this.db.table('rc', 'codes'); }
@@ -31,12 +32,32 @@ export class PurchasesService {
 
   private viewSelectSql(extraWhere: string): string {
     return `SELECT p.id, p.buyer_steam, p.listing_id, p.item_id, p.amount, p.quality, p.state, p.rot,
-                   p.purchased_at, p.claimed_at, p.redeem_code,
+                   p.purchased_at, p.claimed_at, p.redeem_code, p.is_bundle,
                    i.name AS item_name, i.image_url, i.type_id, t.name AS type_name
             FROM ${this.purchasesTbl()} p
             LEFT JOIN ${this.itemsTbl()} i ON i.id = p.item_id
             LEFT JOIN ${this.itemTypesTbl()} t ON t.id = i.type_id
             ${extraWhere}`;
+  }
+
+  /** Attach `bundleItems` to every row whose `is_bundle` is true, batched (no N+1). */
+  private async attachBundleItems(rows: PurchaseView[]): Promise<PurchaseView[]> {
+    const bundleIds = rows.filter((r) => Number(r.is_bundle) === 1).map((r) => r.id);
+    if (bundleIds.length === 0) return rows;
+    const children = await this.db.query<PurchaseItemRow>(
+      `SELECT * FROM ${this.purchaseItemsTbl()} WHERE purchase_id IN (${bundleIds.map(() => '?').join(',')})`,
+      bundleIds,
+    );
+    const byPurchase = new Map<number, PurchaseItemRow[]>();
+    for (const c of children) {
+      const arr = byPurchase.get(Number(c.purchase_id)) ?? [];
+      arr.push(c);
+      byPurchase.set(Number(c.purchase_id), arr);
+    }
+    for (const r of rows) {
+      if (Number(r.is_bundle) === 1) r.bundleItems = byPurchase.get(r.id) ?? [];
+    }
+    return rows;
   }
 
   async listMine(buyerSteam: string, filter: PurchaseFilter, page?: number, limit?: number): Promise<Paginated<PurchaseView>> {
@@ -57,12 +78,14 @@ export class PurchasesService {
       this.viewSelectSql(`WHERE ${whereSql} ORDER BY p.purchased_at DESC LIMIT ? OFFSET ?`),
       [...params, np.limit, np.offset],
     );
+    await this.attachBundleItems(rows);
     return { items: rows, total, page: np.page, limit: np.limit, pages: Math.ceil(total / np.limit) };
   }
 
   async getById(id: number): Promise<PurchaseView> {
     const row = await this.db.first<PurchaseView>(this.viewSelectSql(`WHERE p.id = ?`), [id]);
     if (!row) throw new NotFoundException('Purchase not found');
+    await this.attachBundleItems([row]);
     return row;
   }
 
@@ -104,11 +127,24 @@ export class PurchasesService {
       }
 
       const { code, codeId } = await this.insertNewCode(conn);
-      await conn.query(
-        `INSERT INTO ${this.codeItemsTbl()} (code_id, item_id, amount, quality, state, rot)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [codeId, p.item_id, p.amount, p.quality, p.state, p.rot],
-      );
+      if (Number(p.is_bundle) === 1) {
+        const [children] = await conn.query<mysql.RowDataPacket[]>(
+          `SELECT * FROM ${this.purchaseItemsTbl()} WHERE purchase_id = ?`, [p.id],
+        );
+        for (const child of children as unknown as PurchaseItemRow[]) {
+          await conn.query(
+            `INSERT INTO ${this.codeItemsTbl()} (code_id, item_id, amount, quality, state, rot)
+             VALUES (?, ?, ?, ?, ?, 0)`,
+            [codeId, child.item_id, child.amount, child.quality, child.state],
+          );
+        }
+      } else {
+        await conn.query(
+          `INSERT INTO ${this.codeItemsTbl()} (code_id, item_id, amount, quality, state, rot)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [codeId, p.item_id, p.amount, p.quality, p.state, p.rot],
+        );
+      }
       await conn.query(
         `INSERT INTO ${this.codeOwnersTbl()} (code_id, steam_id) VALUES (?, ?)`,
         [codeId, callerSteam],
@@ -169,11 +205,24 @@ export class PurchasesService {
         [codeId, callerSteam],
       );
       for (const p of purchases) {
-        await conn.query(
-          `INSERT INTO ${this.codeItemsTbl()} (code_id, item_id, amount, quality, state, rot)
-           VALUES (?, ?, ?, ?, ?, ?)`,
-          [codeId, p.item_id, p.amount, p.quality, p.state, p.rot],
-        );
+        if (Number(p.is_bundle) === 1) {
+          const [children] = await conn.query<mysql.RowDataPacket[]>(
+            `SELECT * FROM ${this.purchaseItemsTbl()} WHERE purchase_id = ?`, [p.id],
+          );
+          for (const child of children as unknown as PurchaseItemRow[]) {
+            await conn.query(
+              `INSERT INTO ${this.codeItemsTbl()} (code_id, item_id, amount, quality, state, rot)
+               VALUES (?, ?, ?, ?, ?, 0)`,
+              [codeId, child.item_id, child.amount, child.quality, child.state],
+            );
+          }
+        } else {
+          await conn.query(
+            `INSERT INTO ${this.codeItemsTbl()} (code_id, item_id, amount, quality, state, rot)
+             VALUES (?, ?, ?, ?, ?, ?)`,
+            [codeId, p.item_id, p.amount, p.quality, p.state, p.rot],
+          );
+        }
         await conn.query(
           `UPDATE ${this.purchasesTbl()} SET redeem_code = ?, claimed_at = NOW() WHERE id = ?`,
           [code, p.id],

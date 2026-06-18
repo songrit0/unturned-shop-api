@@ -10,6 +10,17 @@ export interface PurchaseRow {
   purchased_at: Date;
   claimed_at: Date | null;
   redeem_code: string | null;
+  /** When true, real items live in `sv_p2p_purchase_items` (see `PurchaseItemRow`). */
+  is_bundle: boolean | number;
+}
+
+export interface PurchaseItemRow {
+  id: number;
+  purchase_id: number;
+  item_id: number;
+  amount: number;
+  quality: number;
+  state: string;
 }
 
 export interface PurchaseView extends PurchaseRow {
@@ -17,6 +28,8 @@ export interface PurchaseView extends PurchaseRow {
   image_url: string | null;
   type_id: number | null;
   type_name: string | null;
+  /** Child items when `is_bundle` is true. Null/omitted for plain purchases. */
+  bundleItems?: PurchaseItemRow[];
 }
 
 export type PurchaseFilter = 'unclaimed' | 'claimed' | 'all';

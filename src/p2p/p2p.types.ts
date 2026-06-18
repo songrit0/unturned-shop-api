@@ -23,6 +23,22 @@ export interface P2PListingRow {
   redeem_code: string | null;
   /** Expiry of `redeem_code` (MySQL DATETIME), or null. */
   code_expires_at: Date | null;
+  /**
+   * When true, this listing has no single item: `item_id`=0 (sentinel), `amount`=child count,
+   * and the real items live in `sv_p2p_listing_items` (see `P2PListingItemRow`). Used for
+   * fill-type items (magazines, fuel cans...) with different per-item fill levels sold together
+   * for one price.
+   */
+  is_bundle: boolean | number;
+}
+
+export interface P2PListingItemRow {
+  id: number;
+  listing_id: number;
+  item_id: number;
+  amount: number;
+  quality: number;
+  state: string;
 }
 
 export interface P2PListingView extends P2PListingRow {
@@ -45,6 +61,11 @@ export interface P2PListingView extends P2PListingRow {
    * Null when the state doesn't parse as a gun (e.g. a magazine stack with empty state).
    */
   gun: GunView | null;
+  /**
+   * Child items when `is_bundle` is true (one row per physical item, exact captured
+   * amount/quality/state preserved). Null/omitted for plain listings.
+   */
+  bundleItems?: P2PListingItemRow[];
 }
 
 export interface CreateListingInput {

@@ -19,6 +19,7 @@ import {
   CreateListingInput,
   ListingsFilter,
   P2PAction,
+  P2PListingItemRow,
   P2PListingRow,
   P2PListingView,
 } from './p2p.types';
@@ -35,7 +36,9 @@ export class P2pService {
     private readonly purchases: PurchasesService,
   ) {}
 
-  private listingsTbl() { return this.db.table('sv', 'p2p_listings'); }
+  private listingsTbl()     { return this.db.table('sv', 'p2p_listings'); }
+  private listingItemsTbl() { return this.db.table('sv', 'p2p_listing_items'); }
+  private purchaseItemsTbl(){ return this.db.table('sv', 'p2p_purchase_items'); }
   private logTbl()      { return this.db.table('sv', 'p2p_log'); }
   private linksTbl()    { return this.db.table('sv', 'links'); }
   private coinsTbl()    { return this.db.table('sv', 'coins'); }
@@ -72,6 +75,29 @@ export class P2pService {
       const g = parsed[i];
       r.gun = g ? buildGunView(g, names) : null;
     });
+    return rows;
+  }
+
+  /**
+   * Attach `bundleItems` to every row whose `is_bundle` is true, batched in one query
+   * (no N+1). Mutates + returns rows.
+   */
+  private async attachBundleItems(rows: P2PListingView[]): Promise<P2PListingView[]> {
+    const bundleIds = rows.filter((r) => Number(r.is_bundle) === 1).map((r) => r.id);
+    if (bundleIds.length === 0) return rows;
+    const children = await this.db.query<P2PListingItemRow>(
+      `SELECT * FROM ${this.listingItemsTbl()} WHERE listing_id IN (${bundleIds.map(() => '?').join(',')})`,
+      bundleIds,
+    );
+    const byListing = new Map<number, P2PListingItemRow[]>();
+    for (const c of children) {
+      const arr = byListing.get(Number(c.listing_id)) ?? [];
+      arr.push(c);
+      byListing.set(Number(c.listing_id), arr);
+    }
+    for (const r of rows) {
+      if (Number(r.is_bundle) === 1) r.bundleItems = byListing.get(r.id) ?? [];
+    }
     return rows;
   }
 
@@ -112,6 +138,7 @@ export class P2pService {
       [...params, np.limit, np.offset],
     );
     await this.enrichGun(rows);
+    await this.attachBundleItems(rows);
     return { items: rows, total, page: np.page, limit: np.limit, pages: Math.ceil(total / np.limit) };
   }
 
@@ -130,6 +157,7 @@ export class P2pService {
     );
     if (!row) throw new NotFoundException('Listing not found');
     await this.enrichGun([row]);
+    await this.attachBundleItems([row]);
     return row;
   }
 
@@ -154,6 +182,7 @@ export class P2pService {
       [steamId, np.limit, np.offset],
     );
     await this.enrichGun(rows);
+    await this.attachBundleItems(rows);
     return { items: rows, total, page: np.page, limit: np.limit, pages: Math.ceil(total / np.limit) };
   }
 
@@ -272,12 +301,31 @@ export class P2pService {
 
         // Record the unclaimed purchase. The buyer redeems it later via /purchases/:id/claim
         // which mints the redeem code; we deliberately do not touch Vaults here.
-        await conn.query(
+        const [pIns] = await conn.query<mysql.ResultSetHeader>(
           `INSERT INTO ${this.db.table('sv', 'p2p_purchases')}
-             (buyer_steam, listing_id, item_id, amount, quality, state, rot)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          [buyerSteam, listingId, listing.item_id, listing.amount, listing.quality, listing.state, listing.rot],
+             (buyer_steam, listing_id, item_id, amount, quality, state, rot, is_bundle)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            buyerSteam, listingId, listing.item_id, listing.amount, listing.quality,
+            listing.state, listing.rot, Number(listing.is_bundle) === 1 ? 1 : 0,
+          ],
         );
+
+        // Bundle: copy the listing's child items onto the new purchase so claim() can mint
+        // a redeem code covering every physical item, not just the item_id=0 sentinel row.
+        if (Number(listing.is_bundle) === 1) {
+          const purchaseId = Number(pIns.insertId);
+          const [children] = await conn.query<mysql.RowDataPacket[]>(
+            `SELECT * FROM ${this.listingItemsTbl()} WHERE listing_id = ?`, [listingId],
+          );
+          for (const child of children as unknown as P2PListingItemRow[]) {
+            await conn.query(
+              `INSERT INTO ${this.purchaseItemsTbl()} (purchase_id, item_id, amount, quality, state)
+               VALUES (?, ?, ?, ?, ?)`,
+              [purchaseId, child.item_id, child.amount, child.quality, child.state],
+            );
+          }
+        }
 
         // Close listing
         await conn.query(
@@ -380,14 +428,29 @@ export class P2pService {
         amount = Number(listing.amount);
         quality = Number(listing.quality);
 
-        // 1) Mint a single-use refund code carrying the held item, expiring in ttlDays.
+        // 1) Mint a single-use refund code carrying the held item(s), expiring in ttlDays.
+        //    Bundles mint ONE code with N rc_code_items rows (one per physical item) so
+        //    expiry/cancel is never lossy for fill-type items sold together.
         const { code: minted, codeId } = await this.purchases.insertNewCode(conn, ttlDays);
         code = minted;
-        await conn.query(
-          `INSERT INTO ${this.db.table('rc', 'code_items')} (code_id, item_id, amount, quality, state, rot)
-           VALUES (?, ?, ?, ?, ?, ?)`,
-          [codeId, listing.item_id, listing.amount, listing.quality, listing.state, listing.rot],
-        );
+        if (Number(listing.is_bundle) === 1) {
+          const [children] = await conn.query<mysql.RowDataPacket[]>(
+            `SELECT * FROM ${this.listingItemsTbl()} WHERE listing_id = ?`, [listingId],
+          );
+          for (const child of children as unknown as P2PListingItemRow[]) {
+            await conn.query(
+              `INSERT INTO ${this.db.table('rc', 'code_items')} (code_id, item_id, amount, quality, state, rot)
+               VALUES (?, ?, ?, ?, ?, 0)`,
+              [codeId, child.item_id, child.amount, child.quality, child.state],
+            );
+          }
+        } else {
+          await conn.query(
+            `INSERT INTO ${this.db.table('rc', 'code_items')} (code_id, item_id, amount, quality, state, rot)
+             VALUES (?, ?, ?, ?, ?, ?)`,
+            [codeId, listing.item_id, listing.amount, listing.quality, listing.state, listing.rot],
+          );
+        }
         await conn.query(
           `INSERT INTO ${this.db.table('sv', 'code_owners')} (code_id, steam_id) VALUES (?, ?)`,
           [codeId, listing.seller_steam],
