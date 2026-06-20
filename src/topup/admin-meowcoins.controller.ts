@@ -23,6 +23,13 @@ class SetProviderDto {
   @IsBoolean() enabled!: boolean;
 }
 
+class ResolveBmcClaimDto {
+  @IsBoolean() approve!: boolean;
+  /** Required when approve=true — how many Meowcoins to credit, decided from the screenshot. */
+  @IsOptional() @IsInt() credit_meowcoins?: number;
+  @IsOptional() @IsString() @MaxLength(255) admin_note?: string;
+}
+
 /** Short actor id for the audit log: steam_id if present, else the Discord sub, else 'admin'. */
 function actorOf(admin: JwtPayload): string {
   return (admin.steam_id ?? admin.sub ?? 'admin').toString().slice(0, 64);
@@ -71,5 +78,19 @@ export class AdminMeowcoinsController {
   @Post('providers')
   setProvider(@Body() body: SetProviderDto) {
     return this.svc.setProvider(body.key, body.enabled);
+  }
+
+  @Get('bmc-claims')
+  bmcClaims(@Query('status') status?: string) {
+    return this.svc.listBmcClaims(status);
+  }
+
+  @Post('bmc-claims/:id/resolve')
+  resolveBmcClaim(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id') id: string,
+    @Body() body: ResolveBmcClaimDto,
+  ) {
+    return this.svc.resolveBmcClaim(parseInt(id, 10), body.approve, actorOf(admin), body.credit_meowcoins, body.admin_note);
   }
 }

@@ -7,7 +7,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { IsIn, IsInt, IsOptional, IsString } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsString, MaxLength } from 'class-validator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtPayload } from '../auth/strategies/jwt.strategy';
@@ -32,6 +32,12 @@ class ThunderVerifyDto {
   @IsString() slip_base64!: string;
 }
 
+class BmcClaimDto {
+  /** Base64-encoded screenshot proving the BuyMeACoffee donation. */
+  @IsString() @MaxLength(10_000_000) screenshot_base64!: string;
+  @IsOptional() @IsString() @MaxLength(255) note?: string;
+}
+
 @Controller('topup')
 @UseGuards(JwtAuthGuard)
 export class TopupController {
@@ -45,6 +51,17 @@ export class TopupController {
   @Post('thunder/verify')
   verifyThunder(@CurrentUser() user: JwtPayload, @Body() body: ThunderVerifyDto) {
     return this.topup.thunderVerify(user, body.ref, body.slip_base64);
+  }
+
+  /** Manual fallback when a BuyMeACoffee donation's webhook couldn't auto-attribute it. */
+  @Post('bmc/claim')
+  createBmcClaim(@CurrentUser() user: JwtPayload, @Body() body: BmcClaimDto) {
+    return this.topup.createBmcClaim(user, body.screenshot_base64, body.note);
+  }
+
+  @Get('bmc/claims')
+  myBmcClaims(@CurrentUser() user: JwtPayload) {
+    return this.topup.myBmcClaims(user);
   }
 
   @Get('me')

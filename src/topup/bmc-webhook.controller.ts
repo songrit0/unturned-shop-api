@@ -36,7 +36,6 @@ export class BmcWebhookController {
     @Req() req: RawBodyRequest<Request>,
     @Headers('x-signature-sha256') signature: string | undefined,
   ) {
-    this.log.log(`BMC webhook received: sigHeader=${signature ? 'present' : 'missing'} bodyLen=${req.rawBody?.length ?? 0}`);
     if (!this.bmc.verifySignature(req.rawBody, signature)) {
       this.log.warn('BMC webhook signature verification failed');
       throw new BadRequestException('invalid_signature');

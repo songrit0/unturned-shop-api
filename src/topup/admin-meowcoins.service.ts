@@ -1,8 +1,9 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import * as mysql from 'mysql2/promise';
 import { DbService } from '../database/db.service';
 import { Paginated, normalizePage } from '../common/pagination';
 import { TopupDbService } from './topup-db.service';
+import { AdminBmcClaimView, BmcClaimStatus } from './topup.types';
 
 export interface AdminTopupRow {
   id: number;
@@ -282,5 +283,108 @@ export class AdminMeowcoinsService {
       `SELECT \`key\`, label, enabled, sort FROM topup_providers WHERE \`key\` = ?`, [key],
     );
     return { key: row!.key, label: row!.label, enabled: Number(row!.enabled) === 1, sort: Number(row!.sort) };
+  }
+
+  // ---- BuyMeACoffee manual claims (donor-submitted proof for un-attributed donations) -------
+
+  /** GET /admin/meowcoins/bmc-claims?status=pending — newest first, with the discord name resolved. */
+  async listBmcClaims(status?: string): Promise<AdminBmcClaimView[]> {
+    const where: string[] = [];
+    const params: any[] = [];
+    const VALID: BmcClaimStatus[] = ['pending', 'approved', 'rejected'];
+    if (status && VALID.includes(status as BmcClaimStatus)) {
+      where.push('status = ?');
+      params.push(status);
+    }
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const rows = await this.topupDb.query<any>(
+      `SELECT id, steam_id, note, screenshot, status, credited_meowcoins, admin_note, created_at, resolved_at
+       FROM bmc_claims ${whereSql} ORDER BY id DESC LIMIT 100`,
+      params,
+    );
+    const names = await this.discordNamesFor(rows.map((r: any) => String(r.steam_id)));
+    return rows.map((r: any) => ({
+      id: Number(r.id),
+      steam_id: String(r.steam_id),
+      discord_name: names.get(String(r.steam_id)) ?? null,
+      note: r.note,
+      screenshot: r.screenshot,
+      status: r.status,
+      credited_meowcoins: r.credited_meowcoins !== null && r.credited_meowcoins !== undefined ? Number(r.credited_meowcoins) : null,
+      admin_note: r.admin_note,
+      created_at: r.created_at,
+      resolved_at: r.resolved_at,
+    }));
+  }
+
+  /**
+   * POST /admin/meowcoins/bmc-claims/:id/resolve — approve (crediting Meowcoins, same wallet
+   * transaction as adjust()) or reject a pending claim. Re-resolving an already-resolved claim
+   * is rejected to avoid crediting twice.
+   */
+  async resolveBmcClaim(
+    id: number,
+    approve: boolean,
+    actor: string,
+    creditMeowcoins?: number,
+    adminNote?: string,
+  ): Promise<AdminBmcClaimView> {
+    const claim = await this.topupDb.first<any>(`SELECT * FROM bmc_claims WHERE id = ?`, [id]);
+    if (!claim) throw new NotFoundException('claim_not_found');
+    if (claim.status !== 'pending') throw new BadRequestException('claim_already_resolved');
+
+    if (approve) {
+      const credit = Math.trunc(creditMeowcoins ?? 0);
+      if (!Number.isFinite(credit) || credit <= 0) {
+        throw new BadRequestException('credit_meowcoins must be a positive number to approve');
+      }
+      const conn = await this.topupDb.getConnection();
+      try {
+        await conn.beginTransaction();
+        await conn.query(
+          `INSERT INTO meow_coins (steam_id, balance) VALUES (?, ?)
+           ON DUPLICATE KEY UPDATE balance = balance + VALUES(balance)`,
+          [claim.steam_id, credit],
+        );
+        await conn.query(
+          `INSERT INTO meow_coin_log (steam_id, delta, reason, ref, actor)
+           VALUES (?, ?, 'bmc_manual_claim', ?, ?)`,
+          [claim.steam_id, credit, `bmcclaim_${id}`, actor],
+        );
+        await conn.query(
+          `UPDATE bmc_claims SET status='approved', credited_meowcoins=?, admin_note=?, resolved_at=NOW() WHERE id=?`,
+          [credit, adminNote?.trim() || null, id],
+        );
+        await conn.commit();
+      } catch (e) {
+        try { await conn.rollback(); } catch { /* ignore */ }
+        throw e;
+      } finally {
+        conn.release();
+      }
+    } else {
+      await this.topupDb.query(
+        `UPDATE bmc_claims SET status='rejected', admin_note=?, resolved_at=NOW() WHERE id=?`,
+        [adminNote?.trim() || null, id],
+      );
+    }
+
+    const row = await this.topupDb.first<any>(
+      `SELECT id, steam_id, note, screenshot, status, credited_meowcoins, admin_note, created_at, resolved_at
+       FROM bmc_claims WHERE id = ?`,
+      [id],
+    );
+    return {
+      id: Number(row.id),
+      steam_id: String(row.steam_id),
+      discord_name: await this.discordNameFor(String(row.steam_id)),
+      note: row.note,
+      screenshot: row.screenshot,
+      status: row.status,
+      credited_meowcoins: row.credited_meowcoins !== null && row.credited_meowcoins !== undefined ? Number(row.credited_meowcoins) : null,
+      admin_note: row.admin_note,
+      created_at: row.created_at,
+      resolved_at: row.resolved_at,
+    };
   }
 }

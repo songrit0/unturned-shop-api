@@ -93,6 +93,26 @@ export interface BmcWebhookResult {
   baht?: number;
 }
 
+export type BmcClaimStatus = 'pending' | 'approved' | 'rejected';
+
+/** A user's own manual-claim row (GET /topup/bmc/claims) — no screenshot in the list view. */
+export interface BmcClaimView {
+  id: number;
+  status: BmcClaimStatus;
+  note: string | null;
+  credited_meowcoins: number | null;
+  admin_note: string | null;
+  created_at: string;
+  resolved_at: string | null;
+}
+
+/** Admin list/detail view — includes the screenshot + steam_id/discord name for review. */
+export interface AdminBmcClaimView extends BmcClaimView {
+  steam_id: string;
+  discord_name: string | null;
+  screenshot: string;
+}
+
 // ---- Donate / Battlepass ----
 
 /** Reward kind discriminator on donation_tier_rewards.kind (0=item, 1=vehicle). */

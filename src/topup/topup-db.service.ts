@@ -112,6 +112,26 @@ export class TopupDbService implements OnModuleInit, OnModuleDestroy {
       );
       await this.seedProviders();
 
+      // Manual fallback for BuyMeACoffee donations the webhook couldn't auto-attribute (no/typo'd
+      // steamID64 in the message). User uploads a screenshot as proof; an admin reviews it and
+      // credits Meowcoins manually via the existing /admin/meowcoins/adjust path.
+      await this.query(
+        `CREATE TABLE IF NOT EXISTS bmc_claims (
+          id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+          steam_id BIGINT UNSIGNED NOT NULL,
+          note VARCHAR(255) NULL,
+          screenshot LONGTEXT NOT NULL,
+          status ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending',
+          credited_meowcoins BIGINT NULL,
+          admin_note VARCHAR(255) NULL,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          resolved_at DATETIME NULL,
+          PRIMARY KEY (id),
+          INDEX idx_steam (steam_id),
+          INDEX idx_status (status)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+      );
+
       // ---- Donate / Battlepass tables (Pi5-local, API-owned) ----
       // Seasonal donation tiers (battlepass): a cumulative monthly donation total unlocks a tier;
       // its reward item-set is delivered as a redeem code the user claims manually. Tiers + claims

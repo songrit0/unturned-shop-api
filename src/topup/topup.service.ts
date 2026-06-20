@@ -17,6 +17,7 @@ import { ThunderService } from './thunder.service';
 import { TopupDbService } from './topup-db.service';
 import { randomBytes } from 'crypto';
 import {
+  BmcClaimView,
   BmcWebhookResult,
   ProviderRow,
   ThunderCreateView,
@@ -394,6 +395,43 @@ export class TopupService {
     return {
       items: rows.map((r) => this.toStatusView(r)),
       total, page: np.page, limit: np.limit, pages: Math.ceil(total / np.limit),
+    };
+  }
+
+  // ---- BuyMeACoffee manual claim (fallback when the webhook couldn't auto-attribute) --------
+
+  /** POST /topup/bmc/claim — donor uploads proof; lands as 'pending' for an admin to review. */
+  async createBmcClaim(user: JwtPayload, screenshotBase64: string, note?: string): Promise<BmcClaimView> {
+    const { steamId } = await this.resolveIdentity(user);
+    const result = await this.topupDb.query<mysql.RowDataPacket[]>(
+      `INSERT INTO bmc_claims (steam_id, note, screenshot) VALUES (?, ?, ?)`,
+      [steamId, note?.trim() || null, screenshotBase64],
+    );
+    const id = (result as any).insertId as number;
+    const row = await this.topupDb.first<any>(`SELECT * FROM bmc_claims WHERE id = ?`, [id]);
+    return this.toBmcClaimView(row);
+  }
+
+  /** GET /topup/bmc/claims — the current user's own claims, newest first (no screenshot payload). */
+  async myBmcClaims(user: JwtPayload): Promise<BmcClaimView[]> {
+    const { steamId } = await this.resolveIdentity(user);
+    const rows = await this.topupDb.query<any>(
+      `SELECT id, status, note, credited_meowcoins, admin_note, created_at, resolved_at
+       FROM bmc_claims WHERE steam_id = ? ORDER BY id DESC LIMIT 20`,
+      [steamId],
+    );
+    return rows.map((r: any) => this.toBmcClaimView(r));
+  }
+
+  private toBmcClaimView(r: any): BmcClaimView {
+    return {
+      id: Number(r.id),
+      status: r.status,
+      note: r.note,
+      credited_meowcoins: r.credited_meowcoins !== null && r.credited_meowcoins !== undefined ? Number(r.credited_meowcoins) : null,
+      admin_note: r.admin_note,
+      created_at: r.created_at,
+      resolved_at: r.resolved_at,
     };
   }
 
