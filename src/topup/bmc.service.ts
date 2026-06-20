@@ -52,6 +52,9 @@ export class BmcService {
     if (!rawBody || !signatureHeader) return false;
 
     const expected = createHmac('sha256', secret).update(rawBody).digest('hex');
+    // TEMP DEBUG (remove once verification is confirmed working): never logs the secret itself,
+    // only the computed vs received signature strings, to diagnose a format/prefix mismatch.
+    this.log.debug(`BMC sig debug: header="${signatureHeader}" expected="${expected}"`);
     const expectedBuf = Buffer.from(expected, 'hex');
     const givenBuf = Buffer.from(signatureHeader, 'hex');
     if (expectedBuf.length !== givenBuf.length) return false;
