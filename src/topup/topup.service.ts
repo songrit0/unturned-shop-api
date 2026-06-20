@@ -17,6 +17,7 @@ import { ThunderService } from './thunder.service';
 import { TopupDbService } from './topup-db.service';
 import { randomBytes } from 'crypto';
 import {
+  BmcWebhookResult,
   ProviderRow,
   ThunderCreateView,
   ThunderVerifyView,
@@ -124,6 +125,9 @@ export class TopupService {
       monthly_cap_baht: this.monthlyCapBaht(),
       monthly_goal_baht: this.monthlyGoalBaht(),
       providers: providers.map((p) => ({ key: p.key, label: p.label })),
+      // BuyMeACoffee is a separate, always-external donate link (no create-intent flow like the
+      // providers above) — surfaced only when an admin has set BMC_PAGE_URL.
+      bmc_page_url: this.cfg.get<string>('bmc.pageUrl') || null,
     };
   }
 
@@ -460,6 +464,54 @@ export class TopupService {
       );
       await conn.commit();
       return true;
+    } catch (e) {
+      try { await conn.rollback(); } catch { /* ignore */ }
+      throw e;
+    } finally {
+      conn.release();
+    }
+  }
+
+  /**
+   * Credits a BuyMeACoffee donation directly (no pending phase — BMC only webhooks us AFTER the
+   * payment has cleared). `ref` is the idempotency key (`bmc_<event id>`); a duplicate webhook
+   * delivery (BMC retries on a non-2xx response) is a no-op via the UNIQUE(ref) guard.
+   * Counts toward the same monthly cap/tier pool as PromptPay donations (`baht` already converted
+   * from USD by the caller) — BMC payments are not blocked by the cap since the money is already
+   * received; the cap only gates NEW top-up creation via the other providers.
+   */
+  async creditBuyMeACoffee(ref: string, steamId: string, baht: number): Promise<BmcWebhookResult> {
+    const meowcoins = Math.round(baht * this.meowcoinPerBaht());
+    const conn = await this.topupDb.getConnection();
+    try {
+      await conn.beginTransaction();
+      try {
+        await conn.query(
+          `INSERT INTO topups
+             (ref, steam_id, discord_id, baht, unique_amount, meowcoins, status, provider, confirmed_at, credited_at)
+           VALUES (?, ?, NULL, ?, ?, ?, 'credited', 'buymeacoffee', NOW(), NOW())`,
+          [ref, steamId, baht, baht, meowcoins],
+        );
+      } catch (e: any) {
+        await conn.rollback();
+        if (e?.code === 'ER_DUP_ENTRY') {
+          this.log.log(`BMC webhook ${ref} already credited — skipping duplicate delivery`);
+          return { handled: false, reason: 'duplicate_event' };
+        }
+        throw e;
+      }
+      await conn.query(
+        `INSERT INTO meow_coins (steam_id, balance) VALUES (?, ?)
+         ON DUPLICATE KEY UPDATE balance = balance + VALUES(balance)`,
+        [steamId, meowcoins],
+      );
+      await conn.query(
+        `INSERT INTO meow_coin_log (steam_id, delta, reason, ref) VALUES (?, ?, 'topup_bmc', ?)`,
+        [steamId, meowcoins, ref],
+      );
+      await conn.commit();
+      this.log.log(`BMC credited: ref=${ref} steam=${steamId} baht=${baht} +${meowcoins} meowcoins`);
+      return { handled: true, steam_id: steamId, baht };
     } catch (e) {
       try { await conn.rollback(); } catch { /* ignore */ }
       throw e;

@@ -50,6 +50,8 @@ export interface AppConfig {
   plernpay: { baseUrl: string; clientId: string; clientSecret: string };
   /** Thunder slip-verification gateway (manual PromptPay + slip upload). */
   thunder: { apiKey: string; promptpayId: string; receiverName: string; baseUrl: string };
+  /** BuyMeACoffee webhook donations (donor self-reports steamID64 in the supporter message). */
+  bmc: { webhookSecret: string; usdToThb: number; pageUrl: string };
 }
 
 export default (): AppConfig => ({
@@ -150,5 +152,14 @@ export default (): AppConfig => ({
     promptpayId: process.env.THUNDER_PROMPTPAY_ID || '',
     receiverName: process.env.THUNDER_RECEIVER_NAME || '',
     baseUrl: process.env.THUNDER_BASE_URL || 'https://api.thunder.in.th/v2',
+  },
+  bmc: {
+    // BuyMeACoffee webhook signing secret (Settings -> Webhooks on the BMC dashboard).
+    webhookSecret: process.env.BMC_WEBHOOK_SECRET || '',
+    // Fixed USD->THB rate used to convert BMC donations (USD) into baht for the
+    // shared monthly cap/tier system. Update as the real rate drifts.
+    usdToThb: parseFloat(process.env.BMC_USD_TO_THB || '36'),
+    // Public BuyMeACoffee page URL shown as a donate link on the web. Empty hides the link.
+    pageUrl: process.env.BMC_PAGE_URL || '',
   },
 });

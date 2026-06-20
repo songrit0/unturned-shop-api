@@ -6,7 +6,7 @@ export type TopupStatus =
   | 'cancelled'
   | 'failed';
 
-export type TopupProvider = 'plernpay' | 'thunder';
+export type TopupProvider = 'plernpay' | 'thunder' | 'buymeacoffee';
 
 /** Row shape in the Pi5-local `topups` table. */
 export interface TopupRow {
@@ -83,6 +83,14 @@ export interface TopupStatusView {
 export interface MeowcoinBalanceView {
   steam_id: string;
   balance: number;
+}
+
+/** Result of processing one BuyMeACoffee webhook event. */
+export interface BmcWebhookResult {
+  handled: boolean;
+  reason?: string;
+  steam_id?: string;
+  baht?: number;
 }
 
 // ---- Donate / Battlepass ----

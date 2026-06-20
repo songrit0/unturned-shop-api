@@ -7,7 +7,9 @@ import { NgrokService } from './ngrok/ngrok.service';
 
 async function bootstrap() {
   const log = new Logger('Bootstrap');
-  const app = await NestFactory.create(AppModule, { cors: true });
+  // rawBody: true keeps the raw request buffer alongside the normal parsed JSON body, needed to
+  // verify the BuyMeACoffee webhook's HMAC signature (which is computed over the raw bytes).
+  const app = await NestFactory.create(AppModule, { cors: true, rawBody: true });
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
 
   const cfg = app.get(ConfigService);
