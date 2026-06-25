@@ -5,7 +5,6 @@ import { DatabaseModule } from './database/database.module';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { FirebaseModule } from './firebase/firebase.module';
-import { NgrokModule } from './ngrok/ngrok.module';
 import { MarketModule } from './market/market.module';
 import { CoinsModule } from './coins/coins.module';
 import { LinkModule } from './link/link.module';
@@ -42,7 +41,6 @@ import { VersionController } from './health/version.controller';
     ConfigModule.forRoot({ isGlobal: true, load: [configuration] }),
     DatabaseModule,
     FirebaseModule,
-    NgrokModule,
     UsersModule,
     AuthModule,
     MarketModule,
