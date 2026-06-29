@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
-import { IsIn, IsInt, Max, Min } from 'class-validator';
+import { IsIn, IsInt, IsOptional, Max, Min } from 'class-validator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtPayload } from '../auth/strategies/jwt.strategy';
@@ -8,6 +8,10 @@ import { GachaService } from './gacha.service';
 class BuyDto {
   @IsInt() @Min(1) @Max(50) count!: number;
   @IsIn(['coins', 'meowcoins']) currency!: 'coins' | 'meowcoins';
+}
+
+class SpinDto {
+  @IsOptional() @IsInt() @Min(1) @Max(50) count?: number;
 }
 
 /** Player-facing daily gacha. All endpoints require a logged-in (linked) user. */
@@ -22,8 +26,8 @@ export class GachaController {
   }
 
   @Post('spin')
-  spin(@CurrentUser() user: JwtPayload) {
-    return this.service.spin(user);
+  spin(@CurrentUser() user: JwtPayload, @Body() body: SpinDto) {
+    return this.service.spinBatch(user, body?.count ?? 1);
   }
 
   @Post('buy')

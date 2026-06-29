@@ -634,6 +634,23 @@ export class GachaService implements OnModuleInit {
     );
   }
 
+  async spinBatch(user: GachaUser, count: number): Promise<{ results: GachaSpinResult[]; remaining: number }> {
+    const n = clampInt(count, 1, 50);
+    const results: GachaSpinResult[] = [];
+    for (let i = 0; i < n; i++) {
+      try {
+        const r = await this.spin(user);
+        results.push(r);
+        if (r.remaining === 0) break;
+      } catch (e: any) {
+        if (results.length === 0) throw e;
+        break; // ran out mid-batch — return what we have
+      }
+    }
+    if (results.length === 0) throw new ConflictException('no_spins');
+    return { results, remaining: results[results.length - 1].remaining };
+  }
+
   // ---- Top Today feed ----
   async today(limit = 20): Promise<GachaTodayEntry[]> {
     const n = clampInt(limit, 1, 50);
