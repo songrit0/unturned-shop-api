@@ -36,6 +36,7 @@ import { HelpModule } from './help/help.module';
 import { HealthController } from './health/health.controller';
 import { VersionController } from './health/version.controller';
 import { ChatController } from './chat/chat.controller';
+import { FilesController } from './files/files.controller';
 
 @Module({
   imports: [
@@ -73,6 +74,6 @@ import { ChatController } from './chat/chat.controller';
     XpModule,
     HelpModule,
   ],
-  controllers: [HealthController, VersionController, ChatController],
+  controllers: [HealthController, VersionController, ChatController, FilesController],
 })
 export class AppModule {}

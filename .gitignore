@@ -6,3 +6,4 @@ secrets/
 !secrets/.gitkeep
 *.log
 .DS_Store
+tmp-files/
