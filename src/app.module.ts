@@ -35,6 +35,7 @@ import { XpModule } from './xp/xp.module';
 import { HelpModule } from './help/help.module';
 import { HealthController } from './health/health.controller';
 import { VersionController } from './health/version.controller';
+import { ChatController } from './chat/chat.controller';
 
 @Module({
   imports: [
@@ -72,6 +73,6 @@ import { VersionController } from './health/version.controller';
     XpModule,
     HelpModule,
   ],
-  controllers: [HealthController, VersionController],
+  controllers: [HealthController, VersionController, ChatController],
 })
 export class AppModule {}
