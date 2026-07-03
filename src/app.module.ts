@@ -28,6 +28,7 @@ import { BotModule } from './bot/bot.module';
 import { VipModule } from './vip/vip.module';
 import { TopupModule } from './topup/topup.module';
 import { PlayerStatsModule } from './player-stats/player-stats.module';
+import { KillsModule } from './kills/kills.module';
 import { PublicModule } from './public/public.module';
 import { GachaModule } from './gacha/gacha.module';
 import { DailyModule } from './daily/daily.module';
@@ -68,6 +69,7 @@ import { FilesController } from './files/files.controller';
     VipModule,
     TopupModule,
     PlayerStatsModule,
+    KillsModule,
     PublicModule,
     GachaModule,
     DailyModule,
