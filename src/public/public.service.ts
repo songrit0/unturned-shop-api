@@ -22,6 +22,7 @@ export interface P2pLatestEntry {
   imageUrl: string | null;
   price: number;
   amount: number;
+  isBundle: boolean;
   createdAt: string;
 }
 
@@ -102,9 +103,12 @@ export class PublicService {
       const rows = await this.db.query<any>(
         // created_at as a literal UTC ISO string — stored UTC but mysql2 timezone:'local' would
         // otherwise shift it by the host offset on a new Date() re-wrap.
-        `SELECT l.id, l.item_id, l.amount, l.price,
+        `SELECT l.id, l.item_id, l.amount, l.price, l.is_bundle,
                 DATE_FORMAT(l.created_at, '%Y-%m-%dT%H:%i:%sZ') AS created_at,
-                i.name AS item_name, i.image_url
+                i.name AS item_name,
+                COALESCE(i.image_url, (SELECT i2.image_url FROM ${this.db.table('sv', 'p2p_listing_items')} li
+                                       JOIN ${this.db.table('sv', 'items')} i2 ON i2.id = li.item_id
+                                       WHERE li.listing_id = l.id AND i2.image_url IS NOT NULL LIMIT 1)) AS image_url
          FROM ${this.db.table('sv', 'p2p_listings')} l
          LEFT JOIN ${this.db.table('sv', 'items')} i ON i.id = l.item_id
          WHERE l.status = 'active'
@@ -119,6 +123,7 @@ export class PublicService {
         imageUrl: r.image_url ?? null,
         price: Number(r.price),
         amount: Number(r.amount),
+        isBundle: Number(r.is_bundle) === 1,
         createdAt: r.created_at ?? '',
       }));
     } catch (e: any) {

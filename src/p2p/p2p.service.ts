@@ -86,7 +86,10 @@ export class P2pService {
     const bundleIds = rows.filter((r) => Number(r.is_bundle) === 1).map((r) => r.id);
     if (bundleIds.length === 0) return rows;
     const children = await this.db.query<P2PListingItemRow>(
-      `SELECT * FROM ${this.listingItemsTbl()} WHERE listing_id IN (${bundleIds.map(() => '?').join(',')})`,
+      `SELECT li.*, i.name AS item_name, i.image_url
+       FROM ${this.listingItemsTbl()} li
+       LEFT JOIN ${this.itemsTbl()} i ON i.id = li.item_id
+       WHERE li.listing_id IN (${bundleIds.map(() => '?').join(',')})`,
       bundleIds,
     );
     const byListing = new Map<number, P2PListingItemRow[]>();

@@ -45,7 +45,10 @@ export class PurchasesService {
     const bundleIds = rows.filter((r) => Number(r.is_bundle) === 1).map((r) => r.id);
     if (bundleIds.length === 0) return rows;
     const children = await this.db.query<PurchaseItemRow>(
-      `SELECT * FROM ${this.purchaseItemsTbl()} WHERE purchase_id IN (${bundleIds.map(() => '?').join(',')})`,
+      `SELECT pi.*, i.name AS item_name, i.image_url
+       FROM ${this.purchaseItemsTbl()} pi
+       LEFT JOIN ${this.itemsTbl()} i ON i.id = pi.item_id
+       WHERE pi.purchase_id IN (${bundleIds.map(() => '?').join(',')})`,
       bundleIds,
     );
     const byPurchase = new Map<number, PurchaseItemRow[]>();

@@ -39,6 +39,9 @@ export interface P2PListingItemRow {
   amount: number;
   quality: number;
   state: string;
+  // Joined from sv_items on the read path so the web can render bundle contents.
+  item_name?: string | null;
+  image_url?: string | null;
 }
 
 export interface P2PListingView extends P2PListingRow {
