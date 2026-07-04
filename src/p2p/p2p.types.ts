@@ -59,6 +59,8 @@ export interface P2PListingView extends P2PListingRow {
    * Null if not bought yet or buyer is not linked.
    */
   buyer_discord_name: string | null;
+  /** In-game player name joined from the PlayerStats plugin table; null if never seen by the stats plugin. */
+  seller_player_name?: string | null;
   /**
    * Parsed gun attachments + ammo when the held item's `state` decodes as a gun.
    * Null when the state doesn't parse as a gun (e.g. a magazine stack with empty state).

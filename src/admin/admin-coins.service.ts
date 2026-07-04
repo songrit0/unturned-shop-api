@@ -8,6 +8,8 @@ export interface CoinUserRow {
   balance: number;
   discord_id: string | null;
   linked_at: string | null;
+  /** In-game player name joined from the PlayerStats plugin table. */
+  player_name?: string | null;
 }
 
 @Injectable()
@@ -20,23 +22,30 @@ export class AdminCoinsService {
     const links = this.db.table('sv', 'links');
     const np = normalizePage(page, limit);
 
+    const stats = this.db.tableRaw('PlayerStats');
+
     const where: string[] = [];
     const params: any[] = [];
     if (search?.trim()) {
-      where.push(`(c.steam_id LIKE ? OR l.discord_id LIKE ?)`);
-      params.push(`%${search.trim()}%`, `%${search.trim()}%`);
+      where.push(`(c.steam_id LIKE ? OR l.discord_id LIKE ? OR ps.Name LIKE ?)`);
+      params.push(`%${search.trim()}%`, `%${search.trim()}%`, `%${search.trim()}%`);
     }
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
     const cntRow = await this.db.first<{ c: number }>(
-      `SELECT COUNT(*) AS c FROM ${coins} c LEFT JOIN ${links} l ON l.steam_id = c.steam_id ${whereSql}`,
+      `SELECT COUNT(*) AS c FROM ${coins} c
+       LEFT JOIN ${links} l ON l.steam_id = c.steam_id
+       LEFT JOIN ${stats} ps ON ps.SteamId = c.steam_id
+       ${whereSql}`,
       params,
     );
     const total = cntRow ? Number(cntRow.c) : 0;
 
     const items = await this.db.query<CoinUserRow>(
-      `SELECT c.steam_id, c.balance, l.discord_id, l.linked_at
-       FROM ${coins} c LEFT JOIN ${links} l ON l.steam_id = c.steam_id
+      `SELECT c.steam_id, c.balance, l.discord_id, l.linked_at, ps.Name AS player_name
+       FROM ${coins} c
+       LEFT JOIN ${links} l ON l.steam_id = c.steam_id
+       LEFT JOIN ${stats} ps ON ps.SteamId = c.steam_id
        ${whereSql}
        ORDER BY c.balance DESC
        LIMIT ? OFFSET ?`,
@@ -50,8 +59,10 @@ export class AdminCoinsService {
     const coins = this.db.table('sv', 'coins');
     const links = this.db.table('sv', 'links');
     const row = await this.db.first<CoinUserRow>(
-      `SELECT c.steam_id, c.balance, l.discord_id, l.linked_at
-       FROM ${coins} c LEFT JOIN ${links} l ON l.steam_id = c.steam_id
+      `SELECT c.steam_id, c.balance, l.discord_id, l.linked_at, ps.Name AS player_name
+       FROM ${coins} c
+       LEFT JOIN ${links} l ON l.steam_id = c.steam_id
+       LEFT JOIN ${this.db.tableRaw('PlayerStats')} ps ON ps.SteamId = c.steam_id
        WHERE c.steam_id = ? LIMIT 1`,
       [steamId],
     );

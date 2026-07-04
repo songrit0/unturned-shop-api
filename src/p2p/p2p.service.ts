@@ -44,6 +44,7 @@ export class P2pService {
   private coinsTbl()    { return this.db.table('sv', 'coins'); }
   private itemsTbl()    { return this.db.table('sv', 'items'); }
   private itemTypesTbl(){ return this.db.table('sv', 'item_types'); }
+  private playerStatsTbl(){ return this.db.tableRaw('PlayerStats'); }
 
   /** Commission percent applied to the buyer's payment; seller receives (1 - pct/100) * price. */
   private commissionPct(): number {
@@ -130,12 +131,14 @@ export class P2pService {
     const rows = await this.db.query<P2PListingView>(
       `SELECT l.*, i.name AS item_name, i.image_url, i.type_id, t.name AS type_name,
               COALESCE(ls.discord_username, ls.discord_global_name, ls.discord_id) AS seller_discord_name,
-              COALESCE(lb.discord_username, lb.discord_global_name, lb.discord_id) AS buyer_discord_name
+              COALESCE(lb.discord_username, lb.discord_global_name, lb.discord_id) AS buyer_discord_name,
+              ps.Name AS seller_player_name
        FROM ${this.listingsTbl()} l
        LEFT JOIN ${this.itemsTbl()} i ON i.id = l.item_id
        LEFT JOIN ${this.itemTypesTbl()} t ON t.id = i.type_id
        LEFT JOIN ${this.linksTbl()} ls ON ls.steam_id = l.seller_steam
        LEFT JOIN ${this.linksTbl()} lb ON lb.steam_id = l.buyer_steam
+       LEFT JOIN ${this.playerStatsTbl()} ps ON ps.SteamId = l.seller_steam
        WHERE ${whereSql}
        ORDER BY l.created_at DESC
        LIMIT ? OFFSET ?`,
@@ -150,12 +153,14 @@ export class P2pService {
     const row = await this.db.first<P2PListingView>(
       `SELECT l.*, i.name AS item_name, i.image_url, i.type_id, t.name AS type_name,
               COALESCE(ls.discord_username, ls.discord_global_name, ls.discord_id) AS seller_discord_name,
-              COALESCE(lb.discord_username, lb.discord_global_name, lb.discord_id) AS buyer_discord_name
+              COALESCE(lb.discord_username, lb.discord_global_name, lb.discord_id) AS buyer_discord_name,
+              ps.Name AS seller_player_name
        FROM ${this.listingsTbl()} l
        LEFT JOIN ${this.itemsTbl()} i ON i.id = l.item_id
        LEFT JOIN ${this.itemTypesTbl()} t ON t.id = i.type_id
        LEFT JOIN ${this.linksTbl()} ls ON ls.steam_id = l.seller_steam
        LEFT JOIN ${this.linksTbl()} lb ON lb.steam_id = l.buyer_steam
+       LEFT JOIN ${this.playerStatsTbl()} ps ON ps.SteamId = l.seller_steam
        WHERE l.id = ?`,
       [id],
     );
@@ -174,12 +179,14 @@ export class P2pService {
     const rows = await this.db.query<P2PListingView>(
       `SELECT l.*, i.name AS item_name, i.image_url, i.type_id, t.name AS type_name,
               COALESCE(ls.discord_username, ls.discord_global_name, ls.discord_id) AS seller_discord_name,
-              COALESCE(lb.discord_username, lb.discord_global_name, lb.discord_id) AS buyer_discord_name
+              COALESCE(lb.discord_username, lb.discord_global_name, lb.discord_id) AS buyer_discord_name,
+              ps.Name AS seller_player_name
        FROM ${this.listingsTbl()} l
        LEFT JOIN ${this.itemsTbl()} i ON i.id = l.item_id
        LEFT JOIN ${this.itemTypesTbl()} t ON t.id = i.type_id
        LEFT JOIN ${this.linksTbl()} ls ON ls.steam_id = l.seller_steam
        LEFT JOIN ${this.linksTbl()} lb ON lb.steam_id = l.buyer_steam
+       LEFT JOIN ${this.playerStatsTbl()} ps ON ps.SteamId = l.seller_steam
        WHERE l.seller_steam = ?
        ORDER BY l.created_at DESC
        LIMIT ? OFFSET ?`,
