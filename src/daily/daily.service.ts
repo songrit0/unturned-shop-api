@@ -245,6 +245,22 @@ export class DailyService implements OnModuleInit {
     };
   }
 
+  /**
+   * What each tier receives today (normal alone vs the combined normal+vip bundle a
+   * VIP gets), regardless of the caller's own tier — powers the VIP-benefits UI.
+   */
+  async tiersPreview(): Promise<{
+    normal: { enabled: boolean; reward: DailyRewardBundle };
+    vip: { enabled: boolean; reward: DailyRewardBundle };
+  }> {
+    const normalTiers = await this.effectiveTiers('normal');
+    const vipTiers = await this.effectiveTiers('vip');
+    return {
+      normal: { enabled: normalTiers.length > 0, reward: await this.combinedBundle(normalTiers) },
+      vip: { enabled: vipTiers.length > 0, reward: await this.combinedBundle(vipTiers) },
+    };
+  }
+
   // ---- player: status ----
   async status(user: DailyUser): Promise<DailyStatus> {
     const steam = await this.resolveSteam(user);

@@ -15,6 +15,12 @@ export class DailyController {
     return this.service.status(user);
   }
 
+  /** Per-tier reward preview (normal vs what a VIP receives) — for the VIP-benefits UI. */
+  @Get('preview')
+  preview() {
+    return this.service.tiersPreview();
+  }
+
   @Post('claim')
   claim(@CurrentUser() user: JwtPayload) {
     return this.service.claim(user);

@@ -34,6 +34,7 @@ import { GachaModule } from './gacha/gacha.module';
 import { DailyModule } from './daily/daily.module';
 import { XpModule } from './xp/xp.module';
 import { HelpModule } from './help/help.module';
+import { BackpackModule } from './backpack/backpack.module';
 import { HealthController } from './health/health.controller';
 import { VersionController } from './health/version.controller';
 import { ChatController } from './chat/chat.controller';
@@ -75,6 +76,7 @@ import { FilesController } from './files/files.controller';
     DailyModule,
     XpModule,
     HelpModule,
+    BackpackModule,
   ],
   controllers: [HealthController, VersionController, ChatController, FilesController],
 })
