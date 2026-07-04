@@ -19,8 +19,7 @@ export interface BackpackUpgradeConfig {
 
 export interface BackpackNextCost {
   coins: number;
-  meowcoins: number | null;                                  // null = meow not available
-  mixed: { coins: number; meowcoins: number } | null;        // null = mixed not available
+  meowcoins: number | null;   // full price in Meowcoins; null = meow not available
 }
 
 export interface BackpackMe {
@@ -28,6 +27,7 @@ export interface BackpackMe {
   vip_only: boolean;
   is_vip: boolean;
   can_upgrade: boolean;
+  mixed_allowed: boolean;          // player may pay part of the price in Meowcoins
   width: number;
   height: number;
   level: number;
@@ -45,7 +45,8 @@ export interface BackpackMe {
  * Costs scale with the CURRENT level (same rule as the in-game /bpu command):
  *   coins  = base_coins * level
  *   meow   = base_meowcoins * level
- *   mixed  = ceil(coins/2) + ceil(meow/2)   // "average": pay half of each side
+ *   mixed  = player picks how many Meowcoins (m) to spend; the coin price is
+ *            discounted pro-rata: coins_due = ceil(coins * (meow - m) / meow)
  */
 @Injectable()
 export class BackpackService implements OnModuleInit {
@@ -125,10 +126,7 @@ export class BackpackService implements OnModuleInit {
   private nextCost(level: number, cfg: BackpackUpgradeConfig): BackpackNextCost {
     const coins = cfg.base_coins * level;
     const meow = cfg.base_meowcoins > 0 ? cfg.base_meowcoins * level : null;
-    const mixed = cfg.mixed_enabled && meow != null
-      ? { coins: Math.ceil(coins / 2), meowcoins: Math.ceil(meow / 2) }
-      : null;
-    return { coins, meowcoins: meow, mixed };
+    return { coins, meowcoins: meow };
   }
 
   async isVip(steamId: string): Promise<boolean> {
@@ -162,6 +160,7 @@ export class BackpackService implements OnModuleInit {
       vip_only: cfg.vip_only,
       is_vip: vip,
       can_upgrade: cfg.enabled && !atMax && (!cfg.vip_only || vip),
+      mixed_allowed: cfg.mixed_enabled && cfg.base_meowcoins > 0,
       width, height, level,
       max_level: maxLevel,
       at_max: atMax,
@@ -175,7 +174,7 @@ export class BackpackService implements OnModuleInit {
    * Meowcoin lives in the separate top-up DB, so meow/mixed run the same SAGA as
    * VipService.buyMeowcoin: keep shop txn open -> wallet.debit -> commit -> refund on commit failure.
    */
-  async upgrade(steamId: string, method: BackpackPayMethod) {
+  async upgrade(steamId: string, method: BackpackPayMethod, meowInput?: number) {
     const cfg = await this.getConfig();
     if (!cfg.enabled) throw new BadRequestException('backpack_upgrade_disabled');
     if (cfg.vip_only && !(await this.isVip(steamId))) throw new ForbiddenException('vip_required');
@@ -206,9 +205,13 @@ export class BackpackService implements OnModuleInit {
         if (cost.meowcoins == null) { await conn.rollback(); throw new BadRequestException('meowcoin_not_available'); }
         meowCost = cost.meowcoins;
       } else if (method === 'mixed') {
-        if (cost.mixed == null) { await conn.rollback(); throw new BadRequestException('mixed_not_available'); }
-        coinCost = cost.mixed.coins;
-        meowCost = cost.mixed.meowcoins;
+        // Player-chosen Meowcoin amount; the coin price shrinks pro-rata.
+        if (!cfg.mixed_enabled || cost.meowcoins == null) {
+          await conn.rollback(); throw new BadRequestException('mixed_not_available');
+        }
+        const m = Math.min(cost.meowcoins, Math.max(0, Math.trunc(Number(meowInput ?? 0))));
+        meowCost = m;
+        coinCost = m >= cost.meowcoins ? 0 : Math.ceil((cost.coins * (cost.meowcoins - m)) / cost.meowcoins);
       } else {
         await conn.rollback(); throw new BadRequestException('invalid_method');
       }
