@@ -99,7 +99,8 @@ export class P2pService {
       byListing.set(Number(c.listing_id), arr);
     }
     for (const r of rows) {
-      if (Number(r.is_bundle) === 1) r.bundleItems = byListing.get(r.id) ?? [];
+      // Number(r.id): BIGINT ids arrive as strings (bigNumberStrings) but the map is keyed by number.
+      if (Number(r.is_bundle) === 1) r.bundleItems = byListing.get(Number(r.id)) ?? [];
     }
     return rows;
   }

@@ -58,7 +58,8 @@ export class PurchasesService {
       byPurchase.set(Number(c.purchase_id), arr);
     }
     for (const r of rows) {
-      if (Number(r.is_bundle) === 1) r.bundleItems = byPurchase.get(r.id) ?? [];
+      // Number(r.id): BIGINT ids arrive as strings (bigNumberStrings) but the map is keyed by number.
+      if (Number(r.is_bundle) === 1) r.bundleItems = byPurchase.get(Number(r.id)) ?? [];
     }
     return rows;
   }
