@@ -25,4 +25,10 @@ export class PublicController {
   serverStatus() {
     return this.service.serverStatus();
   }
+
+  /** Who's online right now (name + total playtime), for the header widget. */
+  @Get('online-players')
+  onlinePlayers() {
+    return this.service.onlinePlayers();
+  }
 }

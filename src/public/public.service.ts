@@ -26,6 +26,13 @@ export interface P2pLatestEntry {
   createdAt: string;
 }
 
+/** One online player for the header widget. `hours` = lifetime playtime in hours (1 decimal). */
+export interface OnlinePlayerEntry {
+  steamId: string;
+  name: string;
+  hours: number;
+}
+
 export interface DonateTotal {
   communityTotal: number;
   communityGoal: number;
@@ -129,6 +136,32 @@ export class PublicService {
     } catch (e: any) {
       this.log.warn(`p2pLatest failed: ${e.message}`);
       return [];
+    }
+  }
+
+  /**
+   * Players currently online: sv_player_xp.online flag (mirrored by the GameMenu plugin on a
+   * timer) joined with PlayerStats for the canonical name + total playtime. The updated_at
+   * cutoff drops ghost rows left behind if the game server dies without flipping online=0.
+   */
+  async onlinePlayers(): Promise<{ count: number; players: OnlinePlayerEntry[] }> {
+    try {
+      const rows = await this.db.query<any>(
+        `SELECT x.steam_id, COALESCE(ps.Name, x.name) AS name, ps.Playtime AS playtime
+         FROM ${this.db.table('sv', 'player_xp')} x
+         LEFT JOIN ${this.db.tableRaw('PlayerStats')} ps ON ps.SteamId = x.steam_id
+         WHERE x.online = 1 AND x.updated_at > (UTC_TIMESTAMP() - INTERVAL 5 MINUTE)
+         ORDER BY name`,
+      );
+      const players = rows.map((r) => ({
+        steamId: String(r.steam_id),
+        name: r.name ?? 'Unknown',
+        hours: Math.round((Number(r.playtime) || 0) / 3600 * 10) / 10,
+      }));
+      return { count: players.length, players };
+    } catch (e: any) {
+      this.log.warn(`onlinePlayers failed: ${e.message}`);
+      return { count: 0, players: [] };
     }
   }
 
