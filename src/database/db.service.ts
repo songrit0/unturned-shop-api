@@ -24,6 +24,11 @@ export class DbService implements OnModuleInit, OnModuleDestroy {
       user: db.user, password: db.password,
       waitForConnections: true, connectionLimit: 10, charset: 'utf8mb4',
       namedPlaceholders: true,
+      // The shop DB server runs at UTC (verified: NOW() == UTC_TIMESTAMP()), so every DATETIME/
+      // TIMESTAMP is a UTC wall time. Read them as UTC instead of the default timezone:'local',
+      // which would shift every raw-Date read by the API host's UTC offset. JS Date params are
+      // likewise written as UTC, matching NOW()/CURRENT_TIMESTAMP rows.
+      timezone: 'Z',
       // Steam IDs are 17-digit BIGINTs that overflow JS Number. Return them (and other big ints) as strings.
       supportBigNumbers: true,
       bigNumberStrings: true,
