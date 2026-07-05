@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
+import { Request } from 'express';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 
 export interface JwtPayload {
@@ -23,10 +24,16 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
       secretOrKey: cfg.get<string>('jwt.secret'),
+      passReqToCallback: true,
     });
   }
 
-  async validate(payload: JwtPayload): Promise<JwtPayload> {
+  async validate(req: Request, payload: JwtPayload): Promise<JwtPayload> {
+    // admin ส่ง X-Act-As-User: 1 เพื่อเทสทั้งระบบในมุมมองผู้เล่นปกติ
+    // ลดสิทธิ์ได้อย่างเดียว (เช็ค is_admin จาก JWT ก่อน) — เพิ่มสิทธิ์ไม่ได้
+    if (payload.is_admin && req.headers['x-act-as-user'] === '1') {
+      return { ...payload, is_admin: false };
+    }
     return payload;
   }
 }

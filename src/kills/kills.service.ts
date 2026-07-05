@@ -30,6 +30,8 @@ export interface ListKillsOptions {
   steamId?: string;
   /** ซ่อน kill ที่ใหม่กว่า X นาที (ผู้เล่นปกติ = 30, admin = 0) */
   delayMinutes: number;
+  /** true = เฉพาะ PvP, false = เฉพาะ PvE, undefined = ทั้งหมด */
+  isPvp?: boolean;
   /** จากวันที่ (YYYY-MM-DD, รวมวันนั้น) */
   from?: string;
   /** ถึงวันที่ (YYYY-MM-DD, รวมวันนั้น) */
@@ -52,6 +54,10 @@ export class KillsService {
     if (opts.steamId) {
       where.push('(k.killer_steam_id = ? OR k.victim_steam_id = ?)');
       params.push(opts.steamId, opts.steamId);
+    }
+    if (opts.isPvp !== undefined) {
+      where.push('k.is_pvp = ?');
+      params.push(opts.isPvp ? 1 : 0);
     }
     if (opts.delayMinutes > 0) {
       where.push('k.created_at <= NOW() - INTERVAL ? MINUTE');

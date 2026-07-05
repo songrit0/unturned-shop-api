@@ -1,5 +1,5 @@
 import { Controller, ForbiddenException, Get, Query, UseGuards } from '@nestjs/common';
-import { IsOptional, IsString, Matches } from 'class-validator';
+import { IsIn, IsOptional, IsString, Matches } from 'class-validator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtPayload } from '../auth/strategies/jwt.strategy';
@@ -14,6 +14,8 @@ class KillsQueryDto extends PaginationQueryDto {
   @IsOptional() @Matches(/^\d{4}-\d{2}-\d{2}$/) to?: string;
   /** admin เท่านั้น: กรองเฉพาะผู้เล่นคนเดียว */
   @IsOptional() @IsString() @Matches(/^\d{17}$/) steam_id?: string;
+  /** กรองประเภท: '1' = PvP, '0' = PvE */
+  @IsOptional() @IsIn(['0', '1']) is_pvp?: string;
 }
 
 @Controller('kills')
@@ -23,10 +25,12 @@ export class KillsController {
 
   @Get()
   list(@CurrentUser() user: JwtPayload, @Query() q: KillsQueryDto) {
+    const isPvp = q.is_pvp == null ? undefined : q.is_pvp === '1';
     if (user.is_admin) {
       return this.svc.list({
         steamId: q.steam_id,
         delayMinutes: 0,
+        isPvp,
         from: q.from,
         to: q.to,
         page: q.page,
@@ -40,6 +44,7 @@ export class KillsController {
     return this.svc.list({
       steamId: user.steam_id,
       delayMinutes: PLAYER_DELAY_MINUTES,
+      isPvp,
       from: q.from,
       to: q.to,
       page: q.page,
