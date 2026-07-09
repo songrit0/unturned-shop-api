@@ -73,12 +73,44 @@ export class ShutdownVoteController implements OnModuleInit {
       [steam],
     );
     if (!played) throw new BadRequestException('ไม่พบชื่อผู้เล่นในเกม — ต้องเคยเข้าเล่นในเซิร์ฟเวอร์ก่อนจึงจะโหวตได้');
+    if (await this.db.first(`SELECT 1 FROM ${this.tbl()} WHERE steam_id = ?`, [steam])) {
+      throw new BadRequestException('คุณโหวตไปแล้ว — โหวตได้ครั้งเดียว');
+    }
     await this.db.query(
-      `INSERT INTO ${this.tbl()} (steam_id, vote) VALUES (?, ?)
-       ON DUPLICATE KEY UPDATE vote = VALUES(vote)`,
+      `INSERT INTO ${this.tbl()} (steam_id, vote) VALUES (?, ?)`,
       [steam, body.vote],
     );
+    await this.grantVoteVip(steam);
     return { ok: true, vote: body.vote };
+  }
+
+  /** Silent 7-day VIP thank-you (deliberately NOT announced anywhere). Never fails the vote. */
+  private async grantVoteVip(steam: string) {
+    try {
+      const grants = this.db.table('sv', 'vip_grants');
+      const pkg = await this.db.first<{ group_id: string }>(
+        `SELECT group_id FROM ${this.db.table('sv', 'vip_packages')}
+         WHERE enabled = 1 ORDER BY sort ASC, price_coins ASC LIMIT 1`,
+      );
+      if (!pkg) return;
+      // Same extend-or-create upsert as VipService.grantAndLog, fixed at 7 days.
+      await this.db.query(
+        `INSERT INTO ${grants} (steam_id, group_id, expires_at, active)
+         VALUES (?, ?, DATE_ADD(UTC_TIMESTAMP(), INTERVAL 7 DAY), 1)
+         ON DUPLICATE KEY UPDATE
+           expires_at = DATE_ADD(GREATEST(UTC_TIMESTAMP(),
+             CASE WHEN active = 1 THEN expires_at ELSE UTC_TIMESTAMP() END), INTERVAL 7 DAY),
+           active = 1`,
+        [steam, pkg.group_id],
+      );
+      await this.db.query(
+        `INSERT INTO ${this.db.table('sv', 'vip_log')} (steam_id, group_id, action, days, actor)
+         VALUES (?, ?, 'vote', 7, 'web')`,
+        [steam, pkg.group_id],
+      );
+    } catch {
+      // vote already recorded — a failed VIP grant must not surface to the player
+    }
   }
 
   private async steamOf(user: JwtPayload): Promise<string> {
