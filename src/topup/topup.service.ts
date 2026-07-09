@@ -115,9 +115,18 @@ export class TopupService {
     return row ? Number(row.total) : 0;
   }
 
+  // ponytail: service shutdown — donations close 2026-07-18 00:00 ICT (= 2026-07-17T17:00Z).
+  // Delete this gate (and its two call sites) if the shutdown is ever cancelled.
+  private static readonly DONATE_CUTOFF_MS = Date.parse('2026-07-17T17:00:00Z');
+  private static donationsClosed(): boolean {
+    return Date.now() >= TopupService.DONATE_CUTOFF_MS;
+  }
+
   /** Public (no-auth) top-up config for the web to gate its UI + show the rate/limits + providers. */
   async publicConfig() {
-    const providers = await this.enabledProviders();
+    const closed = TopupService.donationsClosed();
+    // Empty providers + no BMC link => the web topup page renders its "closed" notice.
+    const providers = closed ? [] : await this.enabledProviders();
     return {
       admin_only: this.adminOnly(),
       meowcoin_per_baht: this.meowcoinPerBaht(),
@@ -128,7 +137,7 @@ export class TopupService {
       providers: providers.map((p) => ({ key: p.key, label: p.label })),
       // BuyMeACoffee is a separate, always-external donate link (no create-intent flow like the
       // providers above) — surfaced only when an admin has set BMC_PAGE_URL.
-      bmc_page_url: this.cfg.get<string>('bmc.pageUrl') || null,
+      bmc_page_url: closed ? null : this.cfg.get<string>('bmc.pageUrl') || null,
     };
   }
 
@@ -174,6 +183,10 @@ export class TopupService {
     baht: number,
     provider: TopupProvider = 'plernpay',
   ): Promise<TopupCreateView | ThunderCreateView> {
+    // Service-shutdown hard gate: no new top-ups from the cutoff onward.
+    if (TopupService.donationsClosed()) {
+      throw new BadRequestException('donations_closed');
+    }
     // Donations open to all by default; re-gate to admins only with TOPUP_ADMIN_ONLY=true.
     if (this.adminOnly() && !user.is_admin) {
       throw new ForbiddenException('topup_admin_only');
