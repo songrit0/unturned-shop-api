@@ -38,6 +38,7 @@ import { BackpackModule } from './backpack/backpack.module';
 import { HealthController } from './health/health.controller';
 import { VersionController } from './health/version.controller';
 import { ChatController } from './chat/chat.controller';
+import { ShutdownVoteController } from './shutdown-vote/shutdown-vote.controller';
 import { FilesController } from './files/files.controller';
 
 @Module({
@@ -78,6 +79,6 @@ import { FilesController } from './files/files.controller';
     HelpModule,
     BackpackModule,
   ],
-  controllers: [HealthController, VersionController, ChatController, FilesController],
+  controllers: [HealthController, VersionController, ChatController, FilesController, ShutdownVoteController],
 })
 export class AppModule {}
